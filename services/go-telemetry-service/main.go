@@ -109,6 +109,11 @@ func main() {
 		os.Exit(1)
 	}
 
+	if _, err := loadTelemetryFraudSettings(); err != nil {
+		logger.Error("invalid telemetry fraud configuration", "error", err)
+		os.Exit(1)
+	}
+
 	if !cfg.AllowInsecureDriverID && cfg.JWTSecret == "" {
 		logger.Error("JWT_HS256_SECRET is required when insecure driver_id authentication is disabled")
 		os.Exit(1)
@@ -164,6 +169,7 @@ func main() {
 
 	go s.runStaleDriverJanitor(ctx)
 	go s.runBiddingEventSubscriber(ctx)
+	go s.runSecurityDisconnectSubscriber(ctx)
 
 	serverErr := make(chan error, 1)
 	go func() {
@@ -335,7 +341,26 @@ func (s *Server) driverWebSocketHandler(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 
-		if err := s.persistAndPublishTelemetry(packet); err != nil {
+		verdict, err := s.validateTelemetryVelocity(packet)
+		if err != nil {
+			s.logger.Error("telemetry fraud validation failed", "driver_id", driverID, "error", err)
+			continue
+		}
+		if verdict.Flagged {
+			s.logger.Warn(
+				"telemetry velocity jump rejected",
+				"driver_id", driverID,
+				"speed_kph", verdict.SpeedKPH,
+				"distance_meters", verdict.DistanceMeters,
+				"elapsed_ms", verdict.Elapsed.Milliseconds(),
+			)
+			if err := s.publishTelemetryVelocityJump(packet, verdict); err != nil {
+				s.logger.Error("velocity fraud event publish failed", "driver_id", driverID, "error", err)
+			}
+			continue
+		}
+
+		if err := s.persistAndPublishTelemetry(packet, verdict.ObservedAt, verdict.UpdateTrustedState); err != nil {
 			s.logger.Error("telemetry redis pipeline failed", "driver_id", driverID, "error", err)
 			continue
 		}
@@ -349,7 +374,11 @@ func (s *Server) driverWebSocketHandler(w http.ResponseWriter, r *http.Request) 
 	}
 }
 
-func (s *Server) persistAndPublishTelemetry(packet TelemetryPacket) error {
+func (s *Server) persistAndPublishTelemetry(
+	packet TelemetryPacket,
+	observedAt time.Time,
+	updateTrustedState bool,
+) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
@@ -358,7 +387,6 @@ func (s *Server) persistAndPublishTelemetry(packet TelemetryPacket) error {
 		return fmt.Errorf("marshal telemetry: %w", err)
 	}
 
-	now := time.Now().UTC()
 	pipe := s.redis.Pipeline()
 	pipe.GeoAdd(ctx, locationsKey, &redis.GeoLocation{
 		Name:      packet.DriverID,
@@ -367,9 +395,14 @@ func (s *Server) persistAndPublishTelemetry(packet TelemetryPacket) error {
 	})
 	pipe.Set(ctx, presencePref+packet.DriverID, packet.Status, s.cfg.PresenceTTL)
 	pipe.ZAdd(ctx, lastSeenKey, redis.Z{
-		Score:  float64(now.UnixMilli()),
+		Score:  float64(observedAt.UnixMilli()),
 		Member: packet.DriverID,
 	})
+	if updateTrustedState {
+		if err := s.appendTrustedTelemetryState(ctx, pipe, packet, observedAt); err != nil {
+			return err
+		}
+	}
 	pipe.Publish(ctx, updatesChan, payload)
 
 	if _, err := pipe.Exec(ctx); err != nil {
