@@ -1,13 +1,11 @@
-import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
-import {
-  AdminJwtGuard,
-  RequireAdminPermissions,
-} from './admin-auth.guard';
+import { Body, Controller, Get, Post, UseFilters } from '@nestjs/common';
+import { AdminAuthExceptionFilter } from './admin-auth.filter';
+import { RequireAdminPermissions } from './admin-auth.guard';
 import { AdminService } from './admin.service';
 import { UpsertGeofenceDto } from './dto/upsert-geofence.dto';
 
 @Controller('admin')
-@UseGuards(AdminJwtGuard)
+@UseFilters(AdminAuthExceptionFilter)
 export class AdminController {
   constructor(private readonly admin: AdminService) {}
 
