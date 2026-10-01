@@ -14,10 +14,10 @@ final class DriverTelemetryPacket {
   final String status;
 
   Map<String, Object> toJson() => <String, Object>{
-        'driver_id': driverId,
-        'latitude': latitude,
-        'longitude': longitude,
-        'bearing': bearing,
-        'status': status,
-      };
+    'driver_id': driverId,
+    'latitude': latitude,
+    'longitude': longitude,
+    'bearing': bearing,
+    'status': status,
+  };
 }
