@@ -12,6 +12,7 @@ import { JwtService } from '@nestjs/jwt';
 import { Reflector } from '@nestjs/core';
 
 const ADMIN_PERMISSIONS_KEY = 'admin_permissions';
+const ADMIN_JWT_COOKIE_NAME = 'fida_admin_access';
 
 export interface AdminPrincipal {
   sub: string;
@@ -42,11 +43,9 @@ export class AdminJwtGuard implements CanActivate {
     }
 
     const request = context.switchToHttp().getRequest<AdminAuthenticatedRequest>();
-    const rawHeader = request.headers.authorization;
-    const raw = Array.isArray(rawHeader) ? rawHeader[0] : rawHeader;
-    const [scheme, token] = raw?.split(' ') ?? [];
-    if (scheme?.toLowerCase() !== 'bearer' || !token) {
-      throw new UnauthorizedException('Admin bearer token required');
+    const token = this.extractToken(request.headers);
+    if (!token) {
+      throw new UnauthorizedException('Admin access token required');
     }
 
     let principal: AdminPrincipal;
@@ -65,10 +64,11 @@ export class AdminJwtGuard implements CanActivate {
       throw new UnauthorizedException('Admin role required');
     }
 
-    const required = this.reflector.getAllAndOverride<string[]>(ADMIN_PERMISSIONS_KEY, [
-      context.getHandler(),
-      context.getClass(),
-    ]) ?? [];
+    const required =
+      this.reflector.getAllAndOverride<string[]>(ADMIN_PERMISSIONS_KEY, [
+        context.getHandler(),
+        context.getClass(),
+      ]) ?? [];
 
     const granted = new Set(principal.permissions ?? []);
     for (const permission of required) {
@@ -79,5 +79,29 @@ export class AdminJwtGuard implements CanActivate {
 
     request.admin = principal;
     return true;
+  }
+
+  private extractToken(headers: Record<string, string | string[] | undefined>): string | null {
+    const rawAuthorization = headers.authorization;
+    const authorization = Array.isArray(rawAuthorization)
+      ? rawAuthorization[0]
+      : rawAuthorization;
+    const [scheme, bearer] = authorization?.split(' ') ?? [];
+    if (scheme?.toLowerCase() === 'bearer' && bearer) {
+      return bearer.trim();
+    }
+
+    const rawCookie = headers.cookie;
+    const cookie = Array.isArray(rawCookie) ? rawCookie[0] : rawCookie;
+    if (!cookie) return null;
+
+    for (const part of cookie.split(';')) {
+      const [name, ...valueParts] = part.trim().split('=');
+      if (name !== ADMIN_JWT_COOKIE_NAME) continue;
+      const value = valueParts.join('=').trim();
+      return value ? decodeURIComponent(value) : null;
+    }
+
+    return null;
   }
 }
