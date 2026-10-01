@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { AttestationModule } from '../attestation/attestation.module';
 import { AuthModule } from '../auth/auth.module';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { DriverEntity } from '../database/entities/driver.entity';
@@ -16,6 +17,7 @@ import { RidesService } from './rides.service';
     TypeOrmModule.forFeature([TripEntity, DriverEntity]),
     UsersModule,
     AuthModule,
+    AttestationModule,
     SurgeModule,
   ],
   controllers: [RidesController],
