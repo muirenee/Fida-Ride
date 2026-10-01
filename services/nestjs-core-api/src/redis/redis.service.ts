@@ -1,11 +1,11 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { createClient, RedisClientType } from 'redis';
+import { createClient } from 'redis';
 
 @Injectable()
 export class RedisService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(RedisService.name);
-  private readonly client: RedisClientType;
+  private readonly client: ReturnType<typeof createClient>;
 
   constructor(private readonly config: ConfigService) {
     this.client = createClient({
