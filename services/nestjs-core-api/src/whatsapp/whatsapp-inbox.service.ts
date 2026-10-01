@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { QueryFailedError, Repository } from 'typeorm';
 import { WhatsAppInboxEntity } from '../database/entities/whatsapp-inbox.entity';
 import {
   WhatsAppInboundMessage,
@@ -25,34 +25,33 @@ export class WhatsAppInboxService {
       const senderPhone = normalizeE164(message.from ?? '');
       if (!messageId || !senderPhone) continue;
 
-      const result = await this.inbox
-        .createQueryBuilder()
-        .insert()
-        .values({
-          messageId,
-          senderPhone,
-          messageType: message.type?.trim() || 'unsupported',
-          messageText: message.text?.body?.trim() || null,
-          locationLat: finiteOrNull(message.location?.latitude),
-          locationLng: finiteOrNull(message.location?.longitude),
-          locationName: message.location?.name?.trim() || null,
-          locationAddress: message.location?.address?.trim() || null,
-          rawPayload: message as unknown as Record<string, unknown>,
-          status: 'pending',
-          attempts: 0,
-          nextAttemptAt: new Date(),
-          lockedAt: null,
-          processedAt: null,
-          lastError: null,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        })
-        .orIgnore()
-        .returning(['id'])
-        .execute();
-
-      const raw = result.raw as unknown;
-      if (Array.isArray(raw) && raw.length > 0) inserted += 1;
+      try {
+        await this.inbox.save(
+          this.inbox.create({
+            messageId,
+            senderPhone,
+            messageType: message.type?.trim() || 'unsupported',
+            messageText: message.text?.body?.trim() || null,
+            locationLat: finiteOrNull(message.location?.latitude),
+            locationLng: finiteOrNull(message.location?.longitude),
+            locationName: message.location?.name?.trim() || null,
+            locationAddress: message.location?.address?.trim() || null,
+            rawPayload: message as unknown as Record<string, unknown>,
+            status: 'pending',
+            attempts: 0,
+            nextAttemptAt: new Date(),
+            lockedAt: null,
+            processedAt: null,
+            lastError: null,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          }),
+        );
+        inserted += 1;
+      } catch (error) {
+        if (this.isDuplicateMessage(error)) continue;
+        throw error;
+      }
     }
 
     return inserted;
@@ -67,6 +66,11 @@ export class WhatsAppInboxService {
       }
     }
     return messages;
+  }
+
+  private isDuplicateMessage(error: unknown): boolean {
+    if (!(error instanceof QueryFailedError)) return false;
+    return (error.driverError as { code?: string } | undefined)?.code === '23505';
   }
 }
 
