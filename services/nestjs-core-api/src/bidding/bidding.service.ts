@@ -14,6 +14,7 @@ import { AcceptBidDto } from './dto/accept-bid.dto';
 import { NegotiateBidDto } from './dto/negotiate-bid.dto';
 
 const OPEN_BIDDING_STATES = new Set(['broadcasted', 'counter_offers_received']);
+const ACTIVE_TRIP_CACHE_TTL_SECONDS = 12 * 60 * 60;
 
 type NegotiationContextRow = {
   rider_id: string;
@@ -251,6 +252,12 @@ export class BiddingService {
           accepted_fare: Number(acceptedFare),
         }),
       });
+
+      await this.redis.setEx(
+        `driver:active-trip:${dto.driver_id}`,
+        ACTIVE_TRIP_CACHE_TTL_SECONDS,
+        dto.trip_id,
+      );
 
       return {
         trip_id: accepted.id,
