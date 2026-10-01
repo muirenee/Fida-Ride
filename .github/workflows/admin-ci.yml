@@ -64,9 +64,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          unformatted="$(gofmt -l .)"
-          if [ -n "$unformatted" ]; then
-            printf 'Unformatted Go files:\n%s\n' "$unformatted"
+          diff="$(gofmt -d .)"
+          if [ -n "$diff" ]; then
+            printf 'gofmt changes required:\n%s\n' "$diff"
             exit 1
           fi
 
