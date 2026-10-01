@@ -1,0 +1,16 @@
+name: fida_ui
+description: Shared Fida-Ride Flutter presentation primitives.
+version: 0.1.0
+publish_to: none
+resolution: workspace
+
+environment:
+  sdk: ^3.13.0
+  flutter: '>=3.47.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_bloc: ^9.1.1
+  google_maps_flutter: ^2.18.2
+  fida_location: ^0.1.0

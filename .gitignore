@@ -8,3 +8,21 @@ node_modules/
 dist/
 coverage/
 *.tsbuildinfo
+
+# Dart / Flutter
+.dart_tool/
+.packages
+.pub/
+build/
+**/build/
+pubspec.lock
+.flutter-plugins
+.flutter-plugins-dependencies
+.metadata
+
+# Android / iOS local build artifacts
+**/android/.gradle/
+**/android/local.properties
+**/ios/Pods/
+**/ios/.symlinks/
+**/ios/Flutter/ephemeral/
