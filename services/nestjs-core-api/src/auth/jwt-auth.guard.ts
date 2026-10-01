@@ -3,6 +3,7 @@ import { JwtService } from '@nestjs/jwt';
 
 export interface AuthPrincipal {
   sub: string;
+  user_id: string;
   role: 'rider' | 'driver';
   driver_id?: string;
   phone?: string;
@@ -29,7 +30,7 @@ export class JwtAuthGuard implements CanActivate {
 
     try {
       const payload = await this.jwt.verifyAsync<AuthPrincipal>(token, { algorithms: ['HS256'] });
-      if (!payload.sub || !payload.role) throw new Error('invalid claims');
+      if (!payload.sub || !payload.user_id || !payload.role) throw new Error('invalid claims');
       request.user = payload;
       return true;
     } catch {
