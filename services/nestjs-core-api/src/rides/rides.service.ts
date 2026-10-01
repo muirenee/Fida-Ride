@@ -58,7 +58,7 @@ export class RidesService {
           fareAmount: quote.fareAmount,
           currency: 'RWF',
           surgeMultiplier: quote.surgeMultiplier,
-          paymentMethod: 'cash',
+          paymentMethod: dto.payment_method ?? 'cash',
           pickupLocation: {
             type: 'Point',
             coordinates: [dto.pickup_lng, dto.pickup_lat],
@@ -136,6 +136,7 @@ export class RidesService {
       trip_id: trip.id,
       status: trip.status,
       vehicle_type: trip.vehicleType,
+      payment_method: trip.paymentMethod,
       estimated_distance_meters: Math.round(distanceMeters),
       estimated_fare: trip.fareAmount,
       currency: trip.currency,
