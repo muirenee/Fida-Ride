@@ -25,7 +25,8 @@ Future<void> main() async {
     'FIDA_TELEMETRY_SESSION_EXPIRES_AT',
   );
 
-  final DateTime? expiresAt = DateTime.tryParse(telemetrySessionExpiresAt)?.toUtc();
+  final DateTime? expiresAt = DateTime.tryParse(telemetrySessionExpiresAt)
+      ?.toUtc();
   List<int>? keyBytes;
   try {
     if (telemetrySessionKey.isNotEmpty) {
@@ -35,8 +36,7 @@ Future<void> main() async {
     keyBytes = null;
   }
 
-  if (
-      accessToken.isEmpty ||
+  if (accessToken.isEmpty ||
       driverId.isEmpty ||
       telemetrySessionId.isEmpty ||
       keyBytes == null ||

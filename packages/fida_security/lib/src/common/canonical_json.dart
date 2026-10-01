@@ -10,10 +10,16 @@ Object? _canonicalize(Object? value) {
     return value.map<Object?>(_canonicalize).toList(growable: false);
   }
   if (value is Map<Object?, Object?>) {
-    final List<String> keys = value.keys.map<String>((Object? key) => key.toString()).toList()..sort();
+    final List<String> keys =
+        value.keys.map<String>((Object? key) => key.toString()).toList()
+          ..sort();
     return <String, Object?>{
       for (final String key in keys) key: _canonicalize(value[key]),
     };
   }
-  throw ArgumentError.value(value, 'value', 'Unsupported canonical JSON value.');
+  throw ArgumentError.value(
+    value,
+    'value',
+    'Unsupported canonical JSON value.',
+  );
 }

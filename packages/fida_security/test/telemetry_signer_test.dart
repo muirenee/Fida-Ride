@@ -30,11 +30,13 @@ void main() {
   });
 
   test('telemetry session parses server response', () {
-    final TelemetrySession session = TelemetrySession.fromJson(<String, Object?>{
-      'session_id': 'session-1',
-      'session_key': base64.encode(List<int>.filled(32, 7)),
-      'expires_at': '2030-01-01T00:00:00Z',
-    });
+    final TelemetrySession session = TelemetrySession.fromJson(
+      <String, Object?>{
+        'session_id': 'session-1',
+        'session_key': base64.encode(List<int>.filled(32, 7)),
+        'expires_at': '2030-01-01T00:00:00Z',
+      },
+    );
 
     expect(session.sessionId, 'session-1');
     expect(session.keyBytes, hasLength(32));

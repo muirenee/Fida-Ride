@@ -10,7 +10,11 @@ final class TelemetrySession {
   }) {
     if (sessionId.isEmpty) throw ArgumentError.value(sessionId, 'sessionId');
     if (keyBytes.length != 32) {
-      throw ArgumentError.value(keyBytes.length, 'keyBytes.length', 'Expected a 256-bit session key.');
+      throw ArgumentError.value(
+        keyBytes.length,
+        'keyBytes.length',
+        'Expected a 256-bit session key.',
+      );
     }
   }
 
@@ -87,7 +91,8 @@ final class TelemetrySigner {
       throw StateError('Telemetry signing session has expired.');
     }
 
-    final int timestamp = (now ?? DateTime.now().toUtc()).millisecondsSinceEpoch;
+    final int timestamp =
+        (now ?? DateTime.now().toUtc()).millisecondsSinceEpoch;
     final int sequence = ++_sequence;
     final String canonical = canonicalTelemetryPayload(
       sessionId: _session.sessionId,
@@ -100,7 +105,10 @@ final class TelemetrySigner {
       sequence: sequence,
     );
 
-    final Digest digest = Hmac(sha256, _session.keyBytes).convert(utf8.encode(canonical));
+    final Digest digest = Hmac(
+      sha256,
+      _session.keyBytes,
+    ).convert(utf8.encode(canonical));
     return SignedTelemetryFields(
       sessionId: _session.sessionId,
       timestamp: timestamp,
@@ -121,7 +129,9 @@ String canonicalTelemetryPayload({
   required int sequence,
 }) {
   if (sessionId.isEmpty || driverId.isEmpty || status.isEmpty) {
-    throw ArgumentError('Telemetry identity, session and status must be non-empty.');
+    throw ArgumentError(
+      'Telemetry identity, session and status must be non-empty.',
+    );
   }
   if (!latitude.isFinite || latitude < -90 || latitude > 90) {
     throw ArgumentError.value(latitude, 'latitude');

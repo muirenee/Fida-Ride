@@ -84,7 +84,9 @@ final class DeviceAttestationService {
     required Map<String, Object?> protectedPayload,
   }) async {
     final String installationId = await _identity.getOrCreate();
-    final String requestHash = _sha256Base64Url(canonicalJson(protectedPayload));
+    final String requestHash = _sha256Base64Url(
+      canonicalJson(protectedPayload),
+    );
     final String platform = _platformName();
 
     final Map<String, Object?> challengeResponse = await _api.postJson(
@@ -97,7 +99,10 @@ final class DeviceAttestationService {
       },
     );
 
-    final String challengeId = _requireString(challengeResponse, 'challenge_id');
+    final String challengeId = _requireString(
+      challengeResponse,
+      'challenge_id',
+    );
     final String challenge = _requireString(challengeResponse, 'challenge');
 
     final String clientData = canonicalJson(<String, Object?>{
@@ -129,7 +134,9 @@ final class DeviceAttestationService {
       );
     }
 
-    throw const DeviceAttestationException('Fida-Ride attestation is supported only on Android and iOS.');
+    throw const DeviceAttestationException(
+      'Fida-Ride attestation is supported only on Android and iOS.',
+    );
   }
 
   Future<AttestationTicket> _verifyAndroid({
@@ -148,7 +155,9 @@ final class DeviceAttestationService {
         <String, Object?>{'requestHash': integrityRequestHash},
       );
       if (token == null || token.isEmpty) {
-        throw const DeviceAttestationException('Play Integrity returned an empty token.');
+        throw const DeviceAttestationException(
+          'Play Integrity returned an empty token.',
+        );
       }
 
       final Map<String, Object?> response = await _api.postJson(
@@ -166,7 +175,10 @@ final class DeviceAttestationService {
       return _ticketFromResponse(response, action, installationId);
     } on PlatformException catch (error) {
       _androidPrepared = false;
-      throw DeviceAttestationException('Play Integrity failed: ${error.code}', error);
+      throw DeviceAttestationException(
+        'Play Integrity failed: ${error.code}',
+        error,
+      );
     }
   }
 
@@ -181,19 +193,25 @@ final class DeviceAttestationService {
     final bool supported =
         await _channel.invokeMethod<bool>('iosIsAppAttestSupported') ?? false;
     if (!supported) {
-      throw const DeviceAttestationException('Apple App Attest is unavailable on this device.');
+      throw const DeviceAttestationException(
+        'Apple App Attest is unavailable on this device.',
+      );
     }
 
     String? keyId = await _readIosKeyId();
     final List<int> clientDataBytes = utf8.encode(clientData);
     final String clientDataBase64 = base64.encode(clientDataBytes);
-    final String clientDataHashBase64 = base64.encode(sha256.convert(clientDataBytes).bytes);
+    final String clientDataHashBase64 = base64.encode(
+      sha256.convert(clientDataBytes).bytes,
+    );
 
     try {
       if (keyId == null || keyId.isEmpty) {
         keyId = await _channel.invokeMethod<String>('iosGenerateKey');
         if (keyId == null || keyId.isEmpty) {
-          throw const DeviceAttestationException('App Attest key generation returned no key identifier.');
+          throw const DeviceAttestationException(
+            'App Attest key generation returned no key identifier.',
+          );
         }
 
         final String? attestation = await _channel.invokeMethod<String>(
@@ -204,7 +222,9 @@ final class DeviceAttestationService {
           },
         );
         if (attestation == null || attestation.isEmpty) {
-          throw const DeviceAttestationException('App Attest returned an empty attestation object.');
+          throw const DeviceAttestationException(
+            'App Attest returned an empty attestation object.',
+          );
         }
 
         final Map<String, Object?> response = await _api.postJson(
@@ -234,7 +254,9 @@ final class DeviceAttestationService {
         },
       );
       if (assertion == null || assertion.isEmpty) {
-        throw const DeviceAttestationException('App Attest returned an empty assertion.');
+        throw const DeviceAttestationException(
+          'App Attest returned an empty assertion.',
+        );
       }
 
       final Map<String, Object?> response = await _api.postJson(
@@ -264,9 +286,15 @@ final class DeviceAttestationService {
           allowKeyRegeneration: false,
         );
       }
-      throw DeviceAttestationException('App Attest server verification failed.', error);
+      throw DeviceAttestationException(
+        'App Attest server verification failed.',
+        error,
+      );
     } on PlatformException catch (error) {
-      throw DeviceAttestationException('App Attest failed: ${error.code}', error);
+      throw DeviceAttestationException(
+        'App Attest failed: ${error.code}',
+        error,
+      );
     }
   }
 
@@ -276,14 +304,16 @@ final class DeviceAttestationService {
     if (current != null) return current;
 
     late final Future<void> future;
-    future = _channel.invokeMethod<void>(
-      'prepareAndroidIntegrity',
-      <String, Object?>{'cloudProjectNumber': _androidCloudProjectNumber},
-    ).then<void>((_) {
-      _androidPrepared = true;
-    }).whenComplete(() {
-      if (identical(_prepareFuture, future)) _prepareFuture = null;
-    });
+    future = _channel
+        .invokeMethod<void>('prepareAndroidIntegrity', <String, Object?>{
+          'cloudProjectNumber': _androidCloudProjectNumber,
+        })
+        .then<void>((_) {
+          _androidPrepared = true;
+        })
+        .whenComplete(() {
+          if (identical(_prepareFuture, future)) _prepareFuture = null;
+        });
     _prepareFuture = future;
     return future;
   }
@@ -297,7 +327,9 @@ final class DeviceAttestationService {
     final String expiresAtRaw = _requireString(response, 'expires_at');
     final DateTime? expiresAt = DateTime.tryParse(expiresAtRaw)?.toUtc();
     if (expiresAt == null) {
-      throw const DeviceAttestationException('Attestation server returned an invalid expiry.');
+      throw const DeviceAttestationException(
+        'Attestation server returned an invalid expiry.',
+      );
     }
     return AttestationTicket(
       ticket: ticket,
@@ -335,8 +367,9 @@ final class DeviceAttestationService {
     throw const DeviceAttestationException('Unsupported attestation platform.');
   }
 
-  static String _sha256Base64Url(String value) =>
-      base64Url.encode(sha256.convert(utf8.encode(value)).bytes).replaceAll('=', '');
+  static String _sha256Base64Url(String value) => base64Url
+      .encode(sha256.convert(utf8.encode(value)).bytes)
+      .replaceAll('=', '');
 
   static String _requireString(Map<String, Object?> json, String key) {
     final Object? value = json[key];
