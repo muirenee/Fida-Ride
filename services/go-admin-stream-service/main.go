@@ -26,6 +26,7 @@ type Config struct {
 	AdminJWTSecret           string
 	AdminJWTIssuer           string
 	AdminJWTAudience         string
+	AllowSubprotocolToken    bool
 	AllowedOrigins           map[string]struct{}
 	IdleTimeout              time.Duration
 	PingInterval             time.Duration
@@ -141,6 +142,10 @@ func loadConfig() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	allowSubprotocolToken, err := envBool("ADMIN_WS_ALLOW_SUBPROTOCOL_TOKEN", false)
+	if err != nil {
+		return Config{}, err
+	}
 	idleTimeout, err := envDuration("WS_IDLE_TIMEOUT", 60*time.Second)
 	if err != nil {
 		return Config{}, err
@@ -162,6 +167,7 @@ func loadConfig() (Config, error) {
 		AdminJWTSecret:           strings.TrimSpace(os.Getenv("ADMIN_JWT_HS256_SECRET")),
 		AdminJWTIssuer:           env("ADMIN_JWT_ISSUER", "fida-ride-admin"),
 		AdminJWTAudience:         env("ADMIN_JWT_AUDIENCE", "fida-admin"),
+		AllowSubprotocolToken:    allowSubprotocolToken,
 		AllowedOrigins:           parseOrigins(os.Getenv("ADMIN_WS_ALLOWED_ORIGINS")),
 		IdleTimeout:              idleTimeout,
 		PingInterval:             pingInterval,
@@ -245,6 +251,15 @@ func envInt(key string, fallback int) (int, error) {
 	parsed, err := strconv.Atoi(value)
 	if err != nil {
 		return 0, fmt.Errorf("%s: %w", key, err)
+	}
+	return parsed, nil
+}
+
+func envBool(key string, fallback bool) (bool, error) {
+	value := env(key, strconv.FormatBool(fallback))
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		return false, fmt.Errorf("%s: %w", key, err)
 	}
 	return parsed, nil
 }
