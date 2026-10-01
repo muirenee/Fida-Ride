@@ -8,9 +8,26 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/redis/go-redis/v9"
 )
 
 const securityDisconnectChannel = "security:disconnect"
+
+var removeDriverSecurityStateScript = redis.NewScript(`
+local driverID = ARGV[1]
+local activeKey = ARGV[2] .. driverID
+local sessionID = redis.call('GET', activeKey)
+redis.call('DEL', activeKey)
+if sessionID then
+  redis.call('DEL', ARGV[3] .. driverID .. ':' .. sessionID)
+  redis.call('DEL', ARGV[4] .. driverID .. ':' .. sessionID)
+end
+redis.call('ZREM', KEYS[1], driverID)
+redis.call('ZREM', KEYS[2], driverID)
+redis.call('DEL', ARGV[5] .. driverID)
+redis.call('DEL', ARGV[6] .. driverID)
+return sessionID or ''
+`)
 
 type SecurityDisconnectEvent struct {
 	Event    string `json:"event"`
@@ -106,15 +123,19 @@ func (s *Server) removeDriverRealtimeState(driverID string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
 	defer cancel()
 
-	pipe := s.redis.Pipeline()
-	pipe.ZRem(ctx, locationsKey, driverID)
-	pipe.ZRem(ctx, lastSeenKey, driverID)
-	pipe.Del(ctx, presencePref+driverID)
-	pipe.Del(ctx, telemetryFraudStatePrefix+driverID)
-
-	if _, err := pipe.Exec(ctx); err != nil {
+	if _, err := removeDriverSecurityStateScript.Run(
+		ctx,
+		s.redis,
+		[]string{locationsKey, lastSeenKey},
+		driverID,
+		telemetryActiveSessionPrefix,
+		telemetrySessionPrefix,
+		telemetrySequencePrefix,
+		presencePref,
+		telemetryFraudStatePrefix,
+	).Result(); err != nil {
 		s.logger.Error(
-			"failed to remove suspended driver realtime state",
+			"failed to remove suspended driver realtime and signing state",
 			"driver_id", driverID,
 			"error", err,
 		)
