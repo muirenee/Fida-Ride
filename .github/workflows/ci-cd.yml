@@ -1,0 +1,495 @@
+name: Fida-Ride CI/CD
+
+on:
+  push:
+    branches:
+      - main
+      - master
+      - development
+  pull_request:
+    branches:
+      - main
+      - master
+      - development
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - closed
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fida-ride-ci-cd-${{ github.event.pull_request.merge_commit_sha || github.sha }}
+  cancel-in-progress: true
+
+env:
+  CI: 'true'
+
+jobs:
+  go-telemetry:
+    name: Go telemetry service
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.action != 'closed' ||
+      github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Go 1.22
+        uses: actions/setup-go@v7
+        with:
+          go-version: '1.22.x'
+          cache: true
+          cache-dependency-path: services/go-telemetry-service/go.sum
+
+      - name: Verify Go module graph
+        working-directory: services/go-telemetry-service
+        shell: bash
+        run: |
+          set -euo pipefail
+          go mod download
+          go mod verify
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
+
+      - name: Verify Go formatting
+        working-directory: services/go-telemetry-service
+        shell: bash
+        run: |
+          set -euo pipefail
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo 'The following Go files are not gofmt formatted:'
+            printf '%s\n' "$unformatted"
+            exit 1
+          fi
+
+      - name: Run Go vet
+        working-directory: services/go-telemetry-service
+        run: go vet ./...
+
+      - name: Run Go tests with coverage
+        working-directory: services/go-telemetry-service
+        env:
+          GO_COVERAGE_MIN: ${{ vars.GO_COVERAGE_MIN || '0' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test -v -covermode=atomic -coverprofile=coverage.out ./...
+
+          total="$(go tool cover -func=coverage.out | awk '/^total:/ {gsub(/%/, "", $3); print $3}')"
+          if [ -z "$total" ]; then
+            total='0'
+          fi
+
+          echo "Go total coverage: ${total}%"
+          echo "Configured minimum: ${GO_COVERAGE_MIN}%"
+
+          awk -v actual="$total" -v minimum="$GO_COVERAGE_MIN" 'BEGIN {
+            if ((actual + 0) < (minimum + 0)) {
+              printf "Coverage %.2f%% is below required %.2f%%\n", actual, minimum;
+              exit 1;
+            }
+          }'
+
+      - name: Build Go production container
+        run: |
+          docker build \
+            --tag fida-ride/go-telemetry-service:ci \
+            services/go-telemetry-service
+
+      - name: Upload Go coverage
+        uses: actions/upload-artifact@v7
+        with:
+          name: go-telemetry-coverage
+          path: services/go-telemetry-service/coverage.out
+          if-no-files-found: error
+          retention-days: 14
+
+  nestjs-core:
+    name: NestJS core API
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.action != 'closed' ||
+      github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      # Fida-Ride does not yet commit package-lock.json. Cache npm's package
+      # download store rather than node_modules itself; this is safer across
+      # Node/npm patch upgrades and still materially accelerates installation.
+      - name: Cache npm packages
+        uses: actions/cache@v5
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-node22-npm-${{ hashFiles('services/nestjs-core-api/package.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node22-npm-
+
+      - name: Install Node dependencies
+        working-directory: services/nestjs-core-api
+        run: npm install --prefer-offline --no-audit --fund=false
+
+      - name: Verify dependency tree
+        working-directory: services/nestjs-core-api
+        run: npm ls --all
+
+      - name: TypeScript typecheck
+        working-directory: services/nestjs-core-api
+        run: npm run typecheck
+
+      - name: Build NestJS application
+        working-directory: services/nestjs-core-api
+        run: npm run build
+
+      - name: Start integration dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          docker run -d \
+            --name fida-ci-postgres \
+            -e POSTGRES_DB=fida_ride_ci \
+            -e POSTGRES_USER=fida_ride \
+            -e POSTGRES_PASSWORD=ci-postgres-password \
+            -p 5432:5432 \
+            postgis/postgis:15-3.3
+
+          docker run -d \
+            --name fida-ci-redis \
+            -p 6379:6379 \
+            redis:7.4-alpine \
+            redis-server \
+            --save '' \
+            --appendonly no \
+            --requirepass ci-redis-password
+
+          for attempt in $(seq 1 30); do
+            if docker exec fida-ci-postgres \
+              pg_isready -U fida_ride -d fida_ride_ci >/dev/null 2>&1; then
+              break
+            fi
+            if [ "$attempt" -eq 30 ]; then
+              docker logs fida-ci-postgres
+              exit 1
+            fi
+            sleep 1
+          done
+
+          for attempt in $(seq 1 30); do
+            if docker exec \
+              -e REDISCLI_AUTH=ci-redis-password \
+              fida-ci-redis \
+              redis-cli ping | grep -q PONG; then
+              break
+            fi
+            if [ "$attempt" -eq 30 ]; then
+              docker logs fida-ci-redis
+              exit 1
+            fi
+            sleep 1
+          done
+
+      - name: Apply database schemas and migrations
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          docker exec -i fida-ci-postgres \
+            psql -v ON_ERROR_STOP=1 \
+            -U fida_ride \
+            -d fida_ride_ci \
+            < init-db.sql
+
+          for migration in database/migrations/schema-v*.sql; do
+            echo "Applying ${migration}"
+            docker exec -i fida-ci-postgres \
+              psql -v ON_ERROR_STOP=1 \
+              -U fida_ride \
+              -d fida_ride_ci \
+              < "$migration"
+          done
+
+      - name: Run NestJS integration smoke test
+        working-directory: services/nestjs-core-api
+        env:
+          NODE_ENV: test
+          PORT: '3000'
+          DB_HOST: 127.0.0.1
+          DB_PORT: '5432'
+          DB_NAME: fida_ride_ci
+          DB_USER: fida_ride
+          DB_PASSWORD: ci-postgres-password
+          REDIS_HOST: 127.0.0.1
+          REDIS_PORT_INTERNAL: '6379'
+          REDIS_PASSWORD: ci-redis-password
+          CORE_REDIS_DB: '0'
+          JWT_HS256_SECRET: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+          JWT_ACCESS_TTL_SECONDS: '900'
+          OTP_HMAC_SECRET: abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789
+          OTP_TTL_SECONDS: '300'
+          OTP_MAX_ATTEMPTS: '5'
+          OTP_DEV_ECHO: 'true'
+          RIDE_BASE_FARE_RWF: '1000'
+          RIDE_PER_KM_RWF: '500'
+          DISPATCH_RADIUS_KM: '5'
+          DISPATCH_CANDIDATE_LIMIT: '100'
+          BIDDING_TTL_SECONDS: '120'
+          BIDDING_ACCEPT_LOCK_TTL_MS: '10000'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cleanup() {
+            if [ -n "${API_PID:-}" ]; then
+              kill "$API_PID" >/dev/null 2>&1 || true
+            fi
+            docker rm -f fida-ci-postgres fida-ci-redis >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          npm run start:prod > /tmp/fida-core-api.log 2>&1 &
+          API_PID=$!
+
+          ready=false
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent --show-error \
+              http://127.0.0.1:3000/api/v1/healthz >/dev/null; then
+              ready=true
+              break
+            fi
+
+            if ! kill -0 "$API_PID" >/dev/null 2>&1; then
+              cat /tmp/fida-core-api.log
+              exit 1
+            fi
+
+            sleep 1
+          done
+
+          if [ "$ready" != 'true' ]; then
+            cat /tmp/fida-core-api.log
+            exit 1
+          fi
+
+          curl --fail --silent --show-error \
+            -X POST http://127.0.0.1:3000/api/v1/auth/register/rider \
+            -H 'Content-Type: application/json' \
+            -d '{"first_name":"CI","last_name":"Rider","phone":"+250788990001"}' \
+            >/tmp/rider-registration.json
+
+          curl --fail --silent --show-error \
+            -X POST http://127.0.0.1:3000/api/v1/auth/register/driver \
+            -H 'Content-Type: application/json' \
+            -d '{"first_name":"CI","last_name":"Driver","phone":"+250788990002","vehicle_type":"taxi","license_plate":"CI-001"}' \
+            >/tmp/driver-registration.json
+
+          result="$(docker exec fida-ci-postgres \
+            psql -At \
+            -U fida_ride \
+            -d fida_ride_ci \
+            -c "SELECT (SELECT COUNT(*) FROM core.users), (SELECT COUNT(*) FROM core.drivers), to_regclass('core.trip_bids') IS NOT NULL;")"
+
+          echo "Database integration result: ${result}"
+          test "$result" = '2|1|t'
+
+      - name: Build NestJS production container
+        run: |
+          docker build \
+            --tag fida-ride/nestjs-core-api:ci \
+            services/nestjs-core-api
+
+  flutter-clients:
+    name: Flutter Rider and Driver clients
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.action != 'closed' ||
+      github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Flutter stable
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+          pub-cache: true
+
+      - name: Show Flutter toolchain
+        run: |
+          flutter --version
+          dart --version
+
+      - name: Resolve Flutter workspace dependencies
+        run: flutter pub get
+
+      - name: Verify Dart formatting
+        run: dart format --output=none --set-exit-if-changed apps packages
+
+      - name: Analyze Flutter workspace
+        run: |
+          flutter analyze \
+            apps/fida_rider \
+            apps/fida_driver \
+            packages/fida_api \
+            packages/fida_location \
+            packages/fida_ui
+
+      - name: Run Flutter unit tests where present
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          packages=(
+            apps/fida_rider
+            apps/fida_driver
+            packages/fida_api
+            packages/fida_location
+            packages/fida_ui
+          )
+
+          found_tests=false
+          for package in "${packages[@]}"; do
+            if [ -d "$package/test" ] && \
+               find "$package/test" -type f -name '*_test.dart' -print -quit | grep -q .; then
+              echo "Running tests in ${package}"
+              (
+                cd "$package"
+                flutter test
+              )
+              found_tests=true
+            fi
+          done
+
+          if [ "$found_tests" != 'true' ]; then
+            echo '::warning::No committed Flutter *_test.dart files were found. Add unit/widget tests to make this gate enforce assertions.'
+          fi
+
+      # Native runner shells are intentionally generated only for branch pushes,
+      # keeping pull-request validation faster while still producing installable
+      # Android artifacts after accepted changes land on a delivery branch.
+      - name: Set up Java for Android release builds
+        if: github.event_name == 'push'
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Generate ephemeral Android runners
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          RIDER_SHELL="$(mktemp -d)"
+          DRIVER_SHELL="$(mktemp -d)"
+
+          flutter create \
+            --platforms=android \
+            --project-name=fida_rider \
+            --org=com.fidalix \
+            --no-pub \
+            "$RIDER_SHELL"
+
+          flutter create \
+            --platforms=android \
+            --project-name=fida_driver \
+            --org=com.fidalix \
+            --no-pub \
+            "$DRIVER_SHELL"
+
+          rm -rf apps/fida_rider/android apps/fida_driver/android
+          cp -R "$RIDER_SHELL/android" apps/fida_rider/android
+          cp "$RIDER_SHELL/.metadata" apps/fida_rider/.metadata
+          cp -R "$DRIVER_SHELL/android" apps/fida_driver/android
+          cp "$DRIVER_SHELL/.metadata" apps/fida_driver/.metadata
+
+      - name: Build Rider release APK
+        if: github.event_name == 'push'
+        working-directory: apps/fida_rider
+        run: flutter build apk --release
+
+      - name: Build Driver release APK
+        if: github.event_name == 'push'
+        working-directory: apps/fida_driver
+        run: flutter build apk --release
+
+      - name: Stage mobile artifacts
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          cp apps/fida_rider/build/app/outputs/flutter-apk/app-release.apk \
+            artifacts/fida-rider-release.apk
+          cp apps/fida_driver/build/app/outputs/flutter-apk/app-release.apk \
+            artifacts/fida-driver-release.apk
+
+      - name: Upload Rider APK
+        if: github.event_name == 'push'
+        uses: actions/upload-artifact@v7
+        with:
+          name: fida-rider-apk-${{ github.sha }}
+          path: artifacts/fida-rider-release.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload Driver APK
+        if: github.event_name == 'push'
+        uses: actions/upload-artifact@v7
+        with:
+          name: fida-driver-apk-${{ github.sha }}
+          path: artifacts/fida-driver-release.apk
+          if-no-files-found: error
+          retention-days: 14
+
+  quality-gate:
+    name: Fida-Ride quality gate
+    if: >-
+      always() &&
+      (github.event_name != 'pull_request' ||
+       github.event.action != 'closed' ||
+       github.event.pull_request.merged == true)
+    runs-on: ubuntu-latest
+    needs:
+      - go-telemetry
+      - nestjs-core
+      - flutter-clients
+
+    steps:
+      - name: Enforce all service gates
+        env:
+          GO_RESULT: ${{ needs.go-telemetry.result }}
+          NEST_RESULT: ${{ needs.nestjs-core.result }}
+          FLUTTER_RESULT: ${{ needs.flutter-clients.result }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "Go telemetry: ${GO_RESULT}"
+          echo "NestJS core: ${NEST_RESULT}"
+          echo "Flutter clients: ${FLUTTER_RESULT}"
+
+          test "$GO_RESULT" = 'success'
+          test "$NEST_RESULT" = 'success'
+          test "$FLUTTER_RESULT" = 'success'
