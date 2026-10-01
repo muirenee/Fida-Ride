@@ -1,6 +1,9 @@
+import 'dart:convert';
+
 import 'package:fida_api/fida_api.dart';
 import 'package:fida_driver/app/driver_app.dart';
 import 'package:fida_driver/infrastructure/driver_telemetry_publisher.dart';
+import 'package:fida_security/fida_security.dart';
 import 'package:flutter/material.dart';
 
 Future<void> main() async {
@@ -12,11 +15,42 @@ Future<void> main() async {
   );
   const String accessToken = String.fromEnvironment('FIDA_ACCESS_TOKEN');
   const String driverId = String.fromEnvironment('FIDA_DRIVER_ID');
+  const String telemetrySessionId = String.fromEnvironment(
+    'FIDA_TELEMETRY_SESSION_ID',
+  );
+  const String telemetrySessionKey = String.fromEnvironment(
+    'FIDA_TELEMETRY_SESSION_KEY',
+  );
+  const String telemetrySessionExpiresAt = String.fromEnvironment(
+    'FIDA_TELEMETRY_SESSION_EXPIRES_AT',
+  );
 
-  if (accessToken.isEmpty || driverId.isEmpty) {
+  final DateTime? expiresAt = DateTime.tryParse(telemetrySessionExpiresAt)?.toUtc();
+  List<int>? keyBytes;
+  try {
+    if (telemetrySessionKey.isNotEmpty) {
+      keyBytes = base64.decode(telemetrySessionKey);
+    }
+  } on FormatException {
+    keyBytes = null;
+  }
+
+  if (
+      accessToken.isEmpty ||
+      driverId.isEmpty ||
+      telemetrySessionId.isEmpty ||
+      keyBytes == null ||
+      keyBytes.length != 32 ||
+      expiresAt == null) {
     runApp(const _MissingSessionApp());
     return;
   }
+
+  final TelemetrySession telemetrySession = TelemetrySession(
+    sessionId: telemetrySessionId,
+    keyBytes: keyBytes,
+    expiresAt: expiresAt,
+  );
 
   final TelemetryWebSocketClient telemetryClient = TelemetryWebSocketClient(
     endpoint: Uri.parse(telemetryUrl),
@@ -25,6 +59,7 @@ Future<void> main() async {
 
   final DriverTelemetryPublisher publisher = DriverTelemetryPublisher(
     telemetryClient: telemetryClient,
+    telemetrySigner: TelemetrySigner(session: telemetrySession),
     driverId: driverId,
   );
 
@@ -43,8 +78,9 @@ final class _MissingSessionApp extends StatelessWidget {
           child: Padding(
             padding: EdgeInsets.all(24),
             child: Text(
-              'Driver session is not configured. Authenticate first or provide '
-              'FIDA_ACCESS_TOKEN and FIDA_DRIVER_ID as --dart-define values for local development.',
+              'Driver security session is not configured. Authenticate and obtain a rotating telemetry session first. '
+              'For local development provide FIDA_ACCESS_TOKEN, FIDA_DRIVER_ID, FIDA_TELEMETRY_SESSION_ID, '
+              'FIDA_TELEMETRY_SESSION_KEY and FIDA_TELEMETRY_SESSION_EXPIRES_AT.',
               textAlign: TextAlign.center,
             ),
           ),
