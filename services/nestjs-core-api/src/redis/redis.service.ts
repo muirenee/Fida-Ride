@@ -52,10 +52,30 @@ end
 return 0
 `;
 
+const claimDeviceOwnerScript = `
+local owner = redis.call('GET', KEYS[1])
+if not owner then
+  redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[2])
+  return ''
+end
+if owner == ARGV[1] then
+  redis.call('EXPIRE', KEYS[1], ARGV[2])
+  return ''
+end
+return owner
+`;
+
+const addScoreWithTtlScript = `
+local score = redis.call('INCRBY', KEYS[1], ARGV[1])
+redis.call('EXPIRE', KEYS[1], ARGV[2])
+return score
+`;
+
 @Injectable()
 export class RedisService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(RedisService.name);
   private readonly client: ReturnType<typeof createClient>;
+  private readonly subscribers = new Set<ReturnType<typeof createClient>>();
 
   constructor(private readonly config: ConfigService) {
     this.client = createClient({
@@ -80,6 +100,17 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   }
 
   async onModuleDestroy(): Promise<void> {
+    for (const subscriber of this.subscribers) {
+      try {
+        if (subscriber.isOpen) await subscriber.close();
+      } catch (error) {
+        this.logger.warn(
+          `Redis subscriber close failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+    this.subscribers.clear();
+
     if (this.client.isOpen) await this.client.close();
   }
 
@@ -123,6 +154,58 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
 
   publish(channel: string, payload: string): Promise<number> {
     return this.client.publish(channel, payload);
+  }
+
+  async subscribe(
+    channel: string,
+    listener: (message: string) => void | Promise<void>,
+  ): Promise<() => Promise<void>> {
+    const subscriber = this.client.duplicate();
+    subscriber.on('error', (error) => {
+      this.logger.error(
+        `Redis subscriber error on ${channel}`,
+        error instanceof Error ? error.stack : String(error),
+      );
+    });
+
+    await subscriber.connect();
+    await subscriber.subscribe(channel, (message) => {
+      void Promise.resolve(listener(message)).catch((error: unknown) => {
+        this.logger.error(
+          `Redis subscription handler failed on ${channel}`,
+          error instanceof Error ? error.stack : String(error),
+        );
+      });
+    });
+    this.subscribers.add(subscriber);
+
+    return async () => {
+      if (!this.subscribers.delete(subscriber)) return;
+      if (!subscriber.isOpen) return;
+      await subscriber.unsubscribe(channel);
+      await subscriber.close();
+    };
+  }
+
+  async claimDeviceOwner(
+    key: string,
+    userId: string,
+    ttlSeconds: number,
+  ): Promise<string | null> {
+    const result = await this.client.eval(claimDeviceOwnerScript, {
+      keys: [key],
+      arguments: [userId, String(ttlSeconds)],
+    });
+    const owner = String(result ?? '');
+    return owner.length > 0 ? owner : null;
+  }
+
+  async addScoreWithTtl(key: string, increment: number, ttlSeconds: number): Promise<number> {
+    const result = await this.client.eval(addScoreWithTtlScript, {
+      keys: [key],
+      arguments: [String(increment), String(ttlSeconds)],
+    });
+    return Number(result);
   }
 
   async geoSearch(
