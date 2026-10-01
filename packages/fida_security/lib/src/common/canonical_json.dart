@@ -30,7 +30,11 @@ Object? _canonicalize(Object? value) {
 String _canonicalNumber(num value) {
   final double normalized = value.toDouble();
   if (!normalized.isFinite) {
-    throw ArgumentError.value(value, 'value', 'Canonical JSON numbers must be finite.');
+    throw ArgumentError.value(
+      value,
+      'value',
+      'Canonical JSON numbers must be finite.',
+    );
   }
   if (normalized == 0) return '0';
 
@@ -55,5 +59,7 @@ String _canonicalNumber(num value) {
   }
 
   final String fixed = normalized.toStringAsFixed(12);
-  return fixed.replaceFirst(RegExp(r'0+$'), '').replaceFirst(RegExp(r'\.$'), '');
+  return fixed
+      .replaceFirst(RegExp(r'0+$'), '')
+      .replaceFirst(RegExp(r'\.$'), '');
 }
