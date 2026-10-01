@@ -104,9 +104,7 @@ export class AdminAuthService implements OnModuleInit {
 
     let passwordMatches = false;
     try {
-      passwordMatches = await argon2.verify(hashToVerify, dto.password, {
-        type: argon2.argon2id,
-      });
+      passwordMatches = await argon2.verify(hashToVerify, dto.password);
     } catch {
       passwordMatches = false;
     }
