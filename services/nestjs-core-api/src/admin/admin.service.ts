@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { DataSource, EntityManager } from 'typeorm';
+import { DataSource, EntityManager, QueryFailedError } from 'typeorm';
 import { VehicleType } from '../common/vehicle-type';
 import { RedisService } from '../redis/redis.service';
 import { UpsertGeofenceDto } from './dto/upsert-geofence.dto';
@@ -122,72 +122,99 @@ export class AdminService {
     const vehicleTypes = dto.vehicle_types ?? Object.values(VehicleType);
     const priority = dto.priority ?? 0;
     const active = dto.active ?? true;
-    const maxPoints = this.config.get<number>('ADMIN_GEOFENCE_MAX_POINTS', 10_000);
+    const configuredMaxPoints = Number(
+      this.config.get<string | number>('ADMIN_GEOFENCE_MAX_POINTS', 10_000),
+    );
+    const maxPoints =
+      Number.isInteger(configuredMaxPoints) && configuredMaxPoints >= 100
+        ? configuredMaxPoints
+        : 10_000;
 
-    const row = await this.db.transaction('SERIALIZABLE', async (manager) => {
-      await manager.query(`SET LOCAL lock_timeout = '1000ms'`);
-      await manager.query(`SET LOCAL statement_timeout = '3000ms'`);
+    let row: GeofenceRow;
+    try {
+      row = await this.db.transaction('SERIALIZABLE', async (manager) => {
+        await manager.query(`SET LOCAL lock_timeout = '1000ms'`);
+        await manager.query(`SET LOCAL statement_timeout = '3000ms'`);
 
-      const inspection = await this.inspectGeometry(manager, dto.geojson);
-      if (!inspection.is_valid) {
-        throw new BadRequestException(`Invalid GeoJSON geometry: ${inspection.validity_reason}`);
-      }
-      if (!['ST_Polygon', 'ST_MultiPolygon'].includes(inspection.geometry_type)) {
-        throw new BadRequestException('GeoJSON must contain a Polygon or MultiPolygon');
-      }
-      if (inspection.point_count > maxPoints) {
-        throw new BadRequestException(`Geofence exceeds the ${maxPoints} point safety limit`);
-      }
+        const inspection = await this.inspectGeometry(manager, dto.geojson);
+        if (!inspection.is_valid) {
+          throw new BadRequestException(
+            `Invalid GeoJSON geometry: ${inspection.validity_reason}`,
+          );
+        }
+        if (!['ST_Polygon', 'ST_MultiPolygon'].includes(inspection.geometry_type)) {
+          throw new BadRequestException('GeoJSON must contain a Polygon or MultiPolygon');
+        }
+        if (inspection.point_count > maxPoints) {
+          throw new BadRequestException(`Geofence exceeds the ${maxPoints} point safety limit`);
+        }
 
-      const rows = (await manager.query(
-        `
-          INSERT INTO core.surge_zones (
-            code,
-            name,
-            boundary,
-            vehicle_types,
-            priority,
-            active
-          )
-          VALUES (
-            $1,
-            $2,
-            ST_Multi(
-              ST_Force2D(
-                ST_SetSRID(
-                  ST_GeomFromGeoJSON($3),
-                  4326
+        const rows = (await manager.query(
+          `
+            INSERT INTO core.surge_zones (
+              code,
+              name,
+              boundary,
+              vehicle_types,
+              priority,
+              active
+            )
+            VALUES (
+              $1,
+              $2,
+              ST_Multi(
+                ST_Force2D(
+                  ST_SetSRID(
+                    ST_GeomFromGeoJSON($3),
+                    4326
+                  )
                 )
-              )
-            ),
-            $4::varchar(32)[],
-            $5,
-            $6
-          )
-          ON CONFLICT (code)
-          DO UPDATE SET
-            name = EXCLUDED.name,
-            boundary = EXCLUDED.boundary,
-            vehicle_types = EXCLUDED.vehicle_types,
-            priority = EXCLUDED.priority,
-            active = EXCLUDED.active,
-            updated_at = NOW()
-          RETURNING
-            id,
-            code,
-            name,
-            priority,
-            active,
-            vehicle_types,
-            updated_at
-        `,
-        [dto.boundary_id, dto.name, dto.geojson, vehicleTypes, priority, active],
-      )) as GeofenceRow[];
+              ),
+              $4::varchar(32)[],
+              $5,
+              $6
+            )
+            ON CONFLICT (code)
+            DO UPDATE SET
+              name = EXCLUDED.name,
+              boundary = EXCLUDED.boundary,
+              vehicle_types = EXCLUDED.vehicle_types,
+              priority = EXCLUDED.priority,
+              active = EXCLUDED.active,
+              updated_at = NOW()
+            RETURNING
+              id,
+              code,
+              name,
+              priority,
+              active,
+              vehicle_types,
+              updated_at
+          `,
+          [dto.boundary_id, dto.name, dto.geojson, vehicleTypes, priority, active],
+        )) as GeofenceRow[];
 
-      const result = rows[0];
-      if (!result) throw new Error('Geofence upsert did not return a row');
-      return result;
-    });
+        const result = rows[0];
+        if (!result) throw new Error('Geofence upsert did not return a row');
+        return result;
+      });
+    } catch (error) {
+      if (error instanceof BadRequestException) throw error;
+      if (error instanceof QueryFailedError) {
+        const databaseError = error.driverError as
+          | { code?: string; message?: string }
+          | undefined;
+        const message = databaseError?.message ?? error.message;
+        if (
+          databaseError?.code === 'XX000' ||
+          databaseError?.code === '22023' ||
+          /geojson|geometry|polygon|parse error/iu.test(message)
+        ) {
+          throw new BadRequestException('GeoJSON geometry is malformed or cannot be normalized');
+        }
+      }
+      throw error;
+    }
 
     await this.invalidateGeofenceCaches(row.id);
     await this.redis.publish(
