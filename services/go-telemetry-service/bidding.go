@@ -38,6 +38,11 @@ type RiderCounterOfferEvent struct {
 	DriverRating float64 `json:"driver_rating"`
 }
 
+type riderJWTClaims struct {
+	UserID string `json:"user_id"`
+	Role   string `json:"role"`
+}
+
 func (s *Server) riderWebSocketHandler(w http.ResponseWriter, r *http.Request) {
 	riderID, err := s.authenticateRider(r)
 	if err != nil {
@@ -111,7 +116,7 @@ func (s *Server) authenticateRider(r *http.Request) (string, error) {
 	if err != nil {
 		return "", errors.New("invalid JWT claims encoding")
 	}
-	var claims jwtClaims
+	var claims riderJWTClaims
 	if err := json.Unmarshal(claimsBytes, &claims); err != nil {
 		return "", errors.New("invalid JWT claims")
 	}
