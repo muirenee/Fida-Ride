@@ -1,7 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { Feature, FeatureCollection, Point } from 'geojson';
 import type { GeoJSONSource, Map as MapLibreMap } from 'maplibre-gl';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 type DriverUpdate = {
   id: string;
@@ -29,6 +30,12 @@ type AdminMetrics = {
   gross_marketplace_revenue: string;
   currency: string;
   generated_at: string;
+};
+
+type DriverFeatureProperties = {
+  id: string;
+  status: 'online' | 'busy';
+  trip_id: string;
 };
 
 type StreamState = 'connecting' | 'live' | 'reconnecting' | 'offline';
@@ -161,7 +168,7 @@ export function GodsEyeView({
         style: mapStyleUrl,
         center: [30.0619, -1.9441],
         zoom: 12,
-        attributionControl: true,
+        attributionControl: { compact: true },
       });
       mapRef.current = map;
       map.addControl(new NavigationControl({ visualizePitch: true }), 'bottom-right');
@@ -281,7 +288,9 @@ export function GodsEyeView({
       if (retryTimer) clearTimeout(retryTimer);
       const socket = socketRef.current;
       socketRef.current = null;
-      if (socket && socket.readyState < WebSocket.CLOSING) socket.close(1000, 'dashboard unmounted');
+      if (socket && socket.readyState < WebSocket.CLOSING) {
+        socket.close(1000, 'dashboard unmounted');
+      }
     };
   }, [adminToken, sendViewport, streamUrl]);
 
@@ -293,7 +302,7 @@ export function GodsEyeView({
 
       if (now - lastSourceRenderAtRef.current >= SOURCE_RENDER_INTERVAL_MS) {
         lastSourceRenderAtRef.current = now;
-        const features: Array<Record<string, unknown>> = [];
+        const features: Array<Feature<Point, DriverFeatureProperties>> = [];
 
         for (const [id, state] of driversRef.current) {
           if (now - state.lastSeenAt > DRIVER_STALE_AFTER_MS) {
@@ -304,7 +313,10 @@ export function GodsEyeView({
           const [lat, lng] = interpolate(state, now);
           features.push({
             type: 'Feature',
-            geometry: { type: 'Point', coordinates: [lng, lat] },
+            geometry: {
+              type: 'Point',
+              coordinates: [lng, lat],
+            },
             properties: {
               id,
               status: state.status,
@@ -313,11 +325,12 @@ export function GodsEyeView({
           });
         }
 
-        const source = mapRef.current?.getSource('drivers') as GeoJSONSource | undefined;
-        source?.setData({
+        const collection: FeatureCollection<Point, DriverFeatureProperties> = {
           type: 'FeatureCollection',
           features,
-        } as Parameters<GeoJSONSource['setData']>[0]);
+        };
+        const source = mapRef.current?.getSource('drivers') as GeoJSONSource | undefined;
+        source?.setData(collection);
       }
 
       if (now - lastCountRenderAtRef.current >= 1_000) {
@@ -408,7 +421,9 @@ export function GodsEyeView({
               {streamLabel}
             </span>
           </div>
-          <p className="mt-2 text-xs text-zinc-400">{visibleDrivers.toLocaleString('en-US')} drivers visible in current viewport</p>
+          <p className="mt-2 text-xs text-zinc-400">
+            {visibleDrivers.toLocaleString('en-US')} drivers visible in current viewport
+          </p>
         </section>
 
         <aside className="pointer-events-auto grid w-[340px] gap-3">
@@ -417,7 +432,9 @@ export function GodsEyeView({
               key={card.label}
               className="rounded-2xl border border-white/10 bg-zinc-950/90 px-5 py-4 shadow-2xl backdrop-blur"
             >
-              <p className="text-xs font-medium uppercase tracking-[0.12em] text-zinc-400">{card.label}</p>
+              <p className="text-xs font-medium uppercase tracking-[0.12em] text-zinc-400">
+                {card.label}
+              </p>
               <p className="mt-1 text-2xl font-semibold tracking-tight text-white">{card.value}</p>
             </article>
           ))}
@@ -430,8 +447,12 @@ export function GodsEyeView({
       </div>
 
       <div className="pointer-events-none absolute bottom-5 left-5 flex gap-3 rounded-xl border border-white/10 bg-zinc-950/85 px-4 py-3 text-xs text-zinc-300 backdrop-blur">
-        <span className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-cyan-400" />Available</span>
-        <span className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-amber-500" />Busy</span>
+        <span className="flex items-center gap-2">
+          <span className="h-2.5 w-2.5 rounded-full bg-cyan-400" />Available
+        </span>
+        <span className="flex items-center gap-2">
+          <span className="h-2.5 w-2.5 rounded-full bg-amber-500" />Busy
+        </span>
       </div>
     </main>
   );
