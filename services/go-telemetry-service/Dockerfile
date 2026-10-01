@@ -5,14 +5,17 @@ WORKDIR /src
 
 RUN apk add --no-cache ca-certificates git
 
-# Copy the module definition and source before resolving dependencies so Go can
-# calculate the complete import graph and generate the required go.sum entries.
-COPY go.mod ./
-COPY main.go ./
+# Dependency metadata is committed so Docker builds are reproducible and do not
+# mutate module state during image creation.
+COPY go.mod go.sum ./
 
 RUN --mount=type=cache,target=/go/pkg/mod \
-    go mod tidy && \
+    go mod download && \
     go mod verify
+
+# Compile the whole package. Bidding/WebSocket extensions live in additional
+# .go files alongside main.go and must be part of the same package build.
+COPY *.go ./
 
 ARG TARGETOS=linux
 ARG TARGETARCH=amd64
@@ -23,7 +26,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     -trimpath \
     -ldflags="-s -w" \
     -o /out/telemetry-service \
-    ./main.go
+    .
 
 FROM alpine:3.20
 RUN apk add --no-cache ca-certificates
