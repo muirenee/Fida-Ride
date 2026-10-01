@@ -23,6 +23,8 @@ const (
 	adminWildcardPermission  = "admin:*"
 )
 
+var errAdminForbidden = errors.New("admin permission denied")
+
 type jwtHeader struct {
 	Algorithm string `json:"alg"`
 }
@@ -45,6 +47,7 @@ type adminStreamPrincipal struct {
 	Permissions []string
 	SessionID   string
 	JWTID       string
+	ExpiresAt   time.Time
 }
 
 type adminSessionRecord struct {
@@ -149,12 +152,6 @@ func validateAdminJWT(token, secret, issuer, audience string, now time.Time) (ad
 		return adminStreamPrincipal{}, errors.New("invalid admin JWT claims")
 	}
 
-	if !validAdminRole(claims.Role) {
-		return adminStreamPrincipal{}, errors.New("administrative role required")
-	}
-	if !hasAdminPermission(claims.Permissions, adminDashboardPermission) {
-		return adminStreamPrincipal{}, errors.New("admin dashboard permission required")
-	}
 	if claims.Issuer != issuer {
 		return adminStreamPrincipal{}, errors.New("admin JWT issuer mismatch")
 	}
@@ -166,6 +163,12 @@ func validateAdminJWT(token, secret, issuer, audience string, now time.Time) (ad
 	}
 	if claims.NotBefore != 0 && now.Unix() < claims.NotBefore {
 		return adminStreamPrincipal{}, errors.New("admin JWT is not active yet")
+	}
+	if !validAdminRole(claims.Role) {
+		return adminStreamPrincipal{}, errAdminForbidden
+	}
+	if !hasAdminPermission(claims.Permissions, adminDashboardPermission) {
+		return adminStreamPrincipal{}, errAdminForbidden
 	}
 
 	subject := strings.TrimSpace(claims.Subject)
@@ -189,6 +192,7 @@ func validateAdminJWT(token, secret, issuer, audience string, now time.Time) (ad
 		Permissions: claims.Permissions,
 		SessionID:   sessionID,
 		JWTID:       jwtID,
+		ExpiresAt:   time.Unix(claims.Expiry, 0).UTC(),
 	}, nil
 }
 
