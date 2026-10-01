@@ -96,7 +96,7 @@ services:
       WS_IDLE_TIMEOUT: ${WS_IDLE_TIMEOUT:-60s}
       WS_PING_INTERVAL: ${WS_PING_INTERVAL:-25s}
       ALLOW_INSECURE_DRIVER_ID: ${TELEMETRY_ALLOW_INSECURE_DRIVER_ID:-true}
-      JWT_HS256_SECRET: ${JWT_HS256_SECRET:-}
+      JWT_HS256_SECRET: ${JWT_HS256_SECRET:?JWT_HS256_SECRET must be set in .env}
       WS_ALLOWED_ORIGINS: ${WS_ALLOWED_ORIGINS:-}
     ports:
       - "127.0.0.1:${GO_TELEMETRY_PORT:-8080}:8080"
@@ -128,16 +128,37 @@ services:
         max-file: "3"
 
   nestjs-core-api:
-    image: busybox:1.36.1
+    build:
+      context: ./services/nestjs-core-api
+      dockerfile: Dockerfile
+    image: fida-ride/nestjs-core-api:local
     container_name: fida-ride-nestjs-core
     restart: unless-stopped
-    command:
-      - /bin/sh
-      - -c
-      - >-
-        mkdir -p /www &&
-        printf '%s\n' '{"service":"nestjs-core-api","status":"stub"}' > /www/index.html &&
-        exec httpd -f -p 3000 -h /www
+    init: true
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: 3000
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${POSTGRES_DB:-fida_ride}
+      DB_USER: ${POSTGRES_USER:-fida_ride}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
+      REDIS_HOST: redis
+      REDIS_PORT_INTERNAL: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}
+      CORE_REDIS_DB: ${CORE_REDIS_DB:-0}
+      JWT_HS256_SECRET: ${JWT_HS256_SECRET:?JWT_HS256_SECRET must be set in .env}
+      JWT_ACCESS_TTL_SECONDS: ${JWT_ACCESS_TTL_SECONDS:-900}
+      OTP_HMAC_SECRET: ${OTP_HMAC_SECRET:?OTP_HMAC_SECRET must be set in .env}
+      OTP_TTL_SECONDS: ${OTP_TTL_SECONDS:-300}
+      OTP_MAX_ATTEMPTS: ${OTP_MAX_ATTEMPTS:-5}
+      OTP_DEV_ECHO: ${OTP_DEV_ECHO:-true}
+      OTP_DELIVERY_URL: ${OTP_DELIVERY_URL:-}
+      OTP_DELIVERY_TOKEN: ${OTP_DELIVERY_TOKEN:-}
+      RIDE_BASE_FARE_RWF: ${RIDE_BASE_FARE_RWF:-1000}
+      RIDE_PER_KM_RWF: ${RIDE_PER_KM_RWF:-500}
+      DISPATCH_RADIUS_KM: ${DISPATCH_RADIUS_KM:-5}
+      DISPATCH_CANDIDATE_LIMIT: ${DISPATCH_CANDIDATE_LIMIT:-100}
     ports:
       - "127.0.0.1:${NESTJS_CORE_PORT:-3000}:3000"
     depends_on:
@@ -148,13 +169,19 @@ services:
     healthcheck:
       test:
         - CMD-SHELL
-        - 'wget -q -O - http://127.0.0.1:3000/ >/dev/null 2>&1 || exit 1'
+        - 'wget -q -O - http://127.0.0.1:3000/api/v1/healthz | grep -q ''"status":"ok"'''
       interval: 10s
       timeout: 3s
-      retries: 6
-      start_period: 5s
+      retries: 8
+      start_period: 20s
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
     security_opt:
       - no-new-privileges:true
+    stop_grace_period: 20s
     networks:
       - fida-ride-network
     logging:
