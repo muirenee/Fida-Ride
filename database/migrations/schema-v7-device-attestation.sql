@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS core.device_attestations (
     user_id             UUID,
     key_id              VARCHAR(512),
     public_key          TEXT,
+    bundle_id           VARCHAR(255),
     sign_count          BIGINT NOT NULL DEFAULT 0,
     status              VARCHAR(16) NOT NULL DEFAULT 'active',
     last_verified_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -40,6 +41,7 @@ CREATE TABLE IF NOT EXISTS core.device_attestations (
             OR (
                 key_id IS NOT NULL
                 AND public_key IS NOT NULL
+                AND bundle_id IS NOT NULL
             )
         )
 );
