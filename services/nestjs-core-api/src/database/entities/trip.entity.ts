@@ -38,6 +38,9 @@ export class TripEntity {
   @Column({ name: 'payment_method', type: 'varchar', length: 16 })
   paymentMethod!: string;
 
+  @Column({ name: 'settlement_transaction_id', type: 'uuid', nullable: true })
+  settlementTransactionId!: string | null;
+
   @Column({ name: 'pickup_location', type: 'geometry', spatialFeatureType: 'Point', srid: 4326 })
   pickupLocation!: GeoPoint;
 
@@ -61,6 +64,9 @@ export class TripEntity {
 
   @Column({ name: 'completed_at', type: 'timestamptz', nullable: true })
   completedAt!: Date | null;
+
+  @Column({ name: 'settled_at', type: 'timestamptz', nullable: true })
+  settledAt!: Date | null;
 
   @Column({ name: 'cancelled_at', type: 'timestamptz', nullable: true })
   cancelledAt!: Date | null;
