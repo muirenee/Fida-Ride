@@ -9,4 +9,5 @@ workspace:
   - apps/fida_driver
   - packages/fida_api
   - packages/fida_location
+  - packages/fida_security
   - packages/fida_ui
