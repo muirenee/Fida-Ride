@@ -10,7 +10,7 @@ export class RidesController {
   @Post('request')
   @UseGuards(JwtAuthGuard)
   requestRide(@Req() request: AuthenticatedRequest, @Body() dto: RequestRideDto) {
-    if (request.user.sub !== dto.rider_id) {
+    if (request.user.user_id !== dto.rider_id) {
       throw new ForbiddenException('rider_id must match the authenticated user');
     }
     return this.rides.requestRide(dto);
