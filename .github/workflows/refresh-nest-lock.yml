@@ -1,0 +1,45 @@
+name: Refresh NestJS Lockfile
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/refresh-nest-lock.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: true
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: services/nestjs-core-api/package-lock.json
+
+      - name: Refresh package lock only
+        working-directory: services/nestjs-core-api
+        run: npm install --package-lock-only --ignore-scripts --no-audit --fund=false
+
+      - name: Commit refreshed lock
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- services/nestjs-core-api/package-lock.json; then
+            echo 'package-lock.json is already current'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add services/nestjs-core-api/package-lock.json
+          git commit -m 'build: refresh NestJS dependency lock'
+          git push origin HEAD:main
