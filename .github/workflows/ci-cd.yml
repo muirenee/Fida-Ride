@@ -180,6 +180,22 @@ jobs:
             --appendonly no \
             --requirepass ci-redis-password
 
+          # The official Postgres/PostGIS entrypoint starts a temporary server
+          # during first-time database initialization, shuts it down, then starts
+          # the final server. Waiting for pg_isready alone can catch that temporary
+          # server and race the shutdown. Wait for the init-complete marker first.
+          for attempt in $(seq 1 60); do
+            if docker logs fida-ci-postgres 2>&1 | \
+              grep -q 'PostgreSQL init process complete; ready for start up.'; then
+              break
+            fi
+            if [ "$attempt" -eq 60 ]; then
+              docker logs fida-ci-postgres
+              exit 1
+            fi
+            sleep 1
+          done
+
           for attempt in $(seq 1 30); do
             if docker exec fida-ci-postgres \
               pg_isready -U fida_ride -d fida_ride_ci >/dev/null 2>&1; then
