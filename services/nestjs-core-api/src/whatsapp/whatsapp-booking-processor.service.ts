@@ -177,6 +177,8 @@ export class WhatsAppBookingProcessorService implements OnModuleInit, OnModuleDe
 
     const extraction = await this.parser.parse(text);
     const session = (await this.sessions.get(message.senderPhone)) ?? this.sessions.fresh();
+    const hadConversationContext = Boolean(session.pickup || session.dropoff || session.awaiting);
+    const explicitVehicleTier = this.parser.explicitVehicleTier(text);
 
     if (extraction.pickup_raw) {
       session.pickup = { raw: extraction.pickup_raw };
@@ -184,7 +186,9 @@ export class WhatsAppBookingProcessorService implements OnModuleInit, OnModuleDe
     if (extraction.dropoff_raw) {
       session.dropoff = { raw: extraction.dropoff_raw };
     }
-    session.vehicleTier = extraction.vehicle_tier;
+    if (!hadConversationContext || explicitVehicleTier) {
+      session.vehicleTier = explicitVehicleTier ?? extraction.vehicle_tier;
+    }
 
     if (!extraction.pickup_raw && !extraction.dropoff_raw && session.awaiting) {
       const candidate = this.parser.locationCandidate(text);
