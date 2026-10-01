@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
 import { AttestationModule } from '../attestation/attestation.module';
+import { FinanceModule } from '../finance/finance.module';
 import { UsersModule } from '../users/users.module';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
@@ -12,6 +13,7 @@ import { TelemetrySessionService } from './telemetry-session.service';
   imports: [
     UsersModule,
     AttestationModule,
+    FinanceModule,
     JwtModule.registerAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
