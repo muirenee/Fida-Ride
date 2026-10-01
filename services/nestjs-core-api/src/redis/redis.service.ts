@@ -129,7 +129,7 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     const offersKey = this.biddingOffersKey(tripId);
     const eligibleKey = this.biddingEligibleKey(tripId);
 
-    await this.client.del(offersKey, eligibleKey);
+    await this.client.del([offersKey, eligibleKey]);
     await this.client.set(stateKey, 'bidding_initiated', { EX: ttlSeconds });
     if (eligibleDriverIds.length > 0) {
       await this.client.sAdd(eligibleKey, eligibleDriverIds);
