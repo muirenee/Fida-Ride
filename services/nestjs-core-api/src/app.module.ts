@@ -7,10 +7,12 @@ import { validateEnvironment } from './config/env.validation';
 import { DriverEntity } from './database/entities/driver.entity';
 import { TripEntity } from './database/entities/trip.entity';
 import { UserEntity } from './database/entities/user.entity';
+import { WhatsAppInboxEntity } from './database/entities/whatsapp-inbox.entity';
 import { HealthController } from './health.controller';
 import { RedisModule } from './redis/redis.module';
 import { RidesModule } from './rides/rides.module';
 import { UsersModule } from './users/users.module';
+import { WhatsAppModule } from './whatsapp/whatsapp.module';
 
 @Module({
   imports: [
@@ -28,7 +30,7 @@ import { UsersModule } from './users/users.module';
         database: config.getOrThrow<string>('DB_NAME'),
         username: config.getOrThrow<string>('DB_USER'),
         password: config.getOrThrow<string>('DB_PASSWORD'),
-        entities: [UserEntity, DriverEntity, TripEntity],
+        entities: [UserEntity, DriverEntity, TripEntity, WhatsAppInboxEntity],
         synchronize: false,
         logging: false,
         extra: {
@@ -44,6 +46,7 @@ import { UsersModule } from './users/users.module';
     AuthModule,
     RidesModule,
     BiddingModule,
+    WhatsAppModule,
   ],
   controllers: [HealthController],
 })

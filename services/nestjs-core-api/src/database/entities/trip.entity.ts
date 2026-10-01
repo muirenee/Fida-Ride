@@ -20,6 +20,12 @@ export class TripEntity {
   @Column({ name: 'vehicle_type', type: 'varchar', length: 32 })
   vehicleType!: string;
 
+  @Column({ name: 'source_channel', type: 'varchar', length: 32, nullable: true })
+  sourceChannel!: string | null;
+
+  @Column({ name: 'source_request_id', type: 'varchar', length: 255, nullable: true })
+  sourceRequestId!: string | null;
+
   @Column({ name: 'fare_amount', type: 'numeric', precision: 19, scale: 4, nullable: true })
   fareAmount!: string | null;
 

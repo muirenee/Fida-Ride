@@ -6,11 +6,24 @@ function requiredString(env: Env, key: string): string {
   return value;
 }
 
+function optionalString(env: Env, key: string, fallback = ''): string {
+  return String(env[key] ?? fallback).trim();
+}
+
 function integer(env: Env, key: string, fallback: number, min = 0): number {
   const raw = String(env[key] ?? fallback);
   const value = Number.parseInt(raw, 10);
   if (!Number.isInteger(value) || value < min) {
     throw new Error(`${key} must be an integer >= ${min}`);
+  }
+  return value;
+}
+
+function decimal(env: Env, key: string, fallback: number, min: number, max: number): number {
+  const raw = String(env[key] ?? fallback);
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < min || value > max) {
+    throw new Error(`${key} must be a number between ${min} and ${max}`);
   }
   return value;
 }
@@ -31,6 +44,32 @@ export function validateEnvironment(env: Env): Record<string, unknown> {
   const otpSecret = requiredString(env, 'OTP_HMAC_SECRET');
   if (otpSecret.length < 32) {
     throw new Error('OTP_HMAC_SECRET must contain at least 32 characters');
+  }
+
+  const whatsappEnabled = boolean(env, 'WHATSAPP_BOT_ENABLED', false);
+  const whatsappLlmEnabled = boolean(env, 'WHATSAPP_BOOKING_LLM_ENABLED', false);
+
+  let whatsappVerifyToken = optionalString(env, 'WHATSAPP_VERIFY_TOKEN');
+  let whatsappAppSecret = optionalString(env, 'WHATSAPP_APP_SECRET');
+  let whatsappAccessToken = optionalString(env, 'WHATSAPP_ACCESS_TOKEN');
+  let whatsappPhoneNumberId = optionalString(env, 'WHATSAPP_PHONE_NUMBER_ID');
+  let whatsappGraphApiVersion = optionalString(env, 'WHATSAPP_GRAPH_API_VERSION');
+  let googleGeocodingApiKey = optionalString(env, 'GOOGLE_GEOCODING_API_KEY');
+  let openAiApiKey = optionalString(env, 'OPENAI_API_KEY');
+  let llmModel = optionalString(env, 'WHATSAPP_BOOKING_LLM_MODEL');
+
+  if (whatsappEnabled) {
+    whatsappVerifyToken = requiredString(env, 'WHATSAPP_VERIFY_TOKEN');
+    whatsappAppSecret = requiredString(env, 'WHATSAPP_APP_SECRET');
+    whatsappAccessToken = requiredString(env, 'WHATSAPP_ACCESS_TOKEN');
+    whatsappPhoneNumberId = requiredString(env, 'WHATSAPP_PHONE_NUMBER_ID');
+    whatsappGraphApiVersion = requiredString(env, 'WHATSAPP_GRAPH_API_VERSION');
+    googleGeocodingApiKey = requiredString(env, 'GOOGLE_GEOCODING_API_KEY');
+  }
+
+  if (whatsappLlmEnabled) {
+    openAiApiKey = requiredString(env, 'OPENAI_API_KEY');
+    llmModel = requiredString(env, 'WHATSAPP_BOOKING_LLM_MODEL');
   }
 
   return {
@@ -58,5 +97,36 @@ export function validateEnvironment(env: Env): Record<string, unknown> {
     DISPATCH_CANDIDATE_LIMIT: integer(env, 'DISPATCH_CANDIDATE_LIMIT', 100, 1),
     BIDDING_TTL_SECONDS: integer(env, 'BIDDING_TTL_SECONDS', 120, 30),
     BIDDING_ACCEPT_LOCK_TTL_MS: integer(env, 'BIDDING_ACCEPT_LOCK_TTL_MS', 10000, 1000),
+    WHATSAPP_BOT_ENABLED: whatsappEnabled,
+    WHATSAPP_VERIFY_TOKEN: whatsappVerifyToken,
+    WHATSAPP_APP_SECRET: whatsappAppSecret,
+    WHATSAPP_ACCESS_TOKEN: whatsappAccessToken,
+    WHATSAPP_PHONE_NUMBER_ID: whatsappPhoneNumberId,
+    WHATSAPP_GRAPH_API_VERSION: whatsappGraphApiVersion,
+    WHATSAPP_ALLOW_LEGACY_SHA1: boolean(env, 'WHATSAPP_ALLOW_LEGACY_SHA1', false),
+    WHATSAPP_OUTBOUND_TIMEOUT_MS: integer(env, 'WHATSAPP_OUTBOUND_TIMEOUT_MS', 8000, 1000),
+    WHATSAPP_WORKER_POLL_MS: integer(env, 'WHATSAPP_WORKER_POLL_MS', 500, 100),
+    WHATSAPP_WORKER_BATCH_SIZE: integer(env, 'WHATSAPP_WORKER_BATCH_SIZE', 10, 1),
+    WHATSAPP_WORKER_MAX_ATTEMPTS: integer(env, 'WHATSAPP_WORKER_MAX_ATTEMPTS', 5, 1),
+    WHATSAPP_PROCESSING_LEASE_SECONDS: integer(env, 'WHATSAPP_PROCESSING_LEASE_SECONDS', 120, 30),
+    WHATSAPP_SESSION_TTL_SECONDS: integer(env, 'WHATSAPP_SESSION_TTL_SECONDS', 1800, 60),
+    WHATSAPP_BOOKING_MIN_CONFIDENCE: decimal(env, 'WHATSAPP_BOOKING_MIN_CONFIDENCE', 0.85, 0, 1),
+    WHATSAPP_BOOKING_LLM_ENABLED: whatsappLlmEnabled,
+    WHATSAPP_BOOKING_LLM_MODEL: llmModel,
+    WHATSAPP_BOOKING_LLM_TIMEOUT_MS: integer(env, 'WHATSAPP_BOOKING_LLM_TIMEOUT_MS', 6000, 500),
+    WHATSAPP_BOOKING_LLM_BYPASS_CONFIDENCE: decimal(
+      env,
+      'WHATSAPP_BOOKING_LLM_BYPASS_CONFIDENCE',
+      0.92,
+      0,
+      1,
+    ),
+    OPENAI_API_KEY: openAiApiKey,
+    GOOGLE_GEOCODING_API_KEY: googleGeocodingApiKey,
+    GOOGLE_GEOCODING_REGION: optionalString(env, 'GOOGLE_GEOCODING_REGION', 'rw'),
+    GOOGLE_GEOCODING_COUNTRY: optionalString(env, 'GOOGLE_GEOCODING_COUNTRY', 'RW'),
+    GOOGLE_GEOCODING_BOUNDS: optionalString(env, 'GOOGLE_GEOCODING_BOUNDS'),
+    GOOGLE_GEOCODING_TIMEOUT_MS: integer(env, 'GOOGLE_GEOCODING_TIMEOUT_MS', 5000, 500),
+    GOOGLE_GEOCODING_MIN_CONFIDENCE: decimal(env, 'GOOGLE_GEOCODING_MIN_CONFIDENCE', 0.82, 0, 1),
   };
 }

@@ -18,5 +18,6 @@ import { RidesService } from './rides.service';
   ],
   controllers: [RidesController],
   providers: [RidesService, PricingService, DispatchService, JwtAuthGuard],
+  exports: [RidesService],
 })
 export class RidesModule {}

@@ -1,15 +1,23 @@
 import 'reflect-metadata';
 
-import { ValidationPipe } from '@nestjs/common';
+import { RequestMethod, ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create(AppModule, { bufferLogs: true });
+  const app = await NestFactory.create(AppModule, {
+    bufferLogs: true,
+    rawBody: true,
+  });
   const config = app.get(ConfigService);
 
-  app.setGlobalPrefix('api/v1');
+  app.setGlobalPrefix('api/v1', {
+    exclude: [
+      { path: 'whatsapp/webhook', method: RequestMethod.GET },
+      { path: 'whatsapp/webhook', method: RequestMethod.POST },
+    ],
+  });
   app.enableShutdownHooks();
   app.useGlobalPipes(
     new ValidationPipe({

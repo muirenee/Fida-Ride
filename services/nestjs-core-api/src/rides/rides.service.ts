@@ -1,13 +1,18 @@
 import { ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { QueryFailedError, Repository } from 'typeorm';
 import { TripEntity } from '../database/entities/trip.entity';
 import { RedisService } from '../redis/redis.service';
 import { UsersService } from '../users/users.service';
 import { RequestRideDto } from './dto/request-ride.dto';
 import { DispatchService } from './dispatch.service';
 import { PricingService } from './pricing.service';
+
+export interface RideRequestContext {
+  sourceChannel?: string;
+  sourceRequestId?: string;
+}
 
 @Injectable()
 export class RidesService {
@@ -23,7 +28,7 @@ export class RidesService {
     private readonly config: ConfigService,
   ) {}
 
-  async requestRide(dto: RequestRideDto) {
+  async requestRide(dto: RequestRideDto, context?: RideRequestContext) {
     const rider = await this.users.requireById(dto.rider_id);
     if (rider.status !== 'active') throw new ForbiddenException('Rider account is not active');
 
@@ -35,28 +40,44 @@ export class RidesService {
       vehicleType: dto.vehicle_type,
     });
 
-    const trip = await this.trips.save(
-      this.trips.create({
-        riderId: rider.id,
-        driverId: null,
-        status: 'matching',
-        vehicleType: dto.vehicle_type,
-        fareAmount: quote.fareAmount,
-        currency: 'RWF',
-        surgeMultiplier: quote.surgeMultiplier,
-        paymentMethod: 'cash',
-        pickupLocation: {
-          type: 'Point',
-          coordinates: [dto.pickup_lng, dto.pickup_lat],
-        },
-        dropoffLocation: {
-          type: 'Point',
-          coordinates: [dto.dropoff_lng, dto.dropoff_lat],
-        },
-        ridePath: null,
-        matchingStartedAt: new Date(),
-      }),
-    );
+    const idempotentExisting = await this.findBySource(context);
+    if (idempotentExisting) {
+      return this.buildResponse(idempotentExisting, quote.distanceMeters, [], true);
+    }
+
+    let trip: TripEntity;
+    try {
+      trip = await this.trips.save(
+        this.trips.create({
+          riderId: rider.id,
+          driverId: null,
+          status: 'matching',
+          vehicleType: dto.vehicle_type,
+          sourceChannel: context?.sourceChannel ?? null,
+          sourceRequestId: context?.sourceRequestId ?? null,
+          fareAmount: quote.fareAmount,
+          currency: 'RWF',
+          surgeMultiplier: quote.surgeMultiplier,
+          paymentMethod: 'cash',
+          pickupLocation: {
+            type: 'Point',
+            coordinates: [dto.pickup_lng, dto.pickup_lat],
+          },
+          dropoffLocation: {
+            type: 'Point',
+            coordinates: [dto.dropoff_lng, dto.dropoff_lat],
+          },
+          ridePath: null,
+          matchingStartedAt: new Date(),
+        }),
+      );
+    } catch (error) {
+      if (this.isUniqueViolation(error)) {
+        const existing = await this.findBySource(context);
+        if (existing) return this.buildResponse(existing, quote.distanceMeters, [], true);
+      }
+      throw error;
+    }
 
     let candidateDriverIds: string[] = [];
     let dispatchDeferred = false;
@@ -84,8 +105,6 @@ export class RidesService {
         }),
       );
     } catch (error) {
-      // PostgreSQL owns the ride state. Cache/broker failure must not make a client
-      // retry an already-created ride; a recovery worker can resume matching later.
       dispatchDeferred = true;
       this.logger.error(
         `Initial dispatch/bidding setup failed for trip ${trip.id}`,
@@ -93,11 +112,31 @@ export class RidesService {
       );
     }
 
+    return this.buildResponse(trip, quote.distanceMeters, candidateDriverIds, dispatchDeferred);
+  }
+
+  private async findBySource(context?: RideRequestContext): Promise<TripEntity | null> {
+    if (!context?.sourceChannel || !context.sourceRequestId) return null;
+    return this.trips.findOne({
+      where: {
+        sourceChannel: context.sourceChannel,
+        sourceRequestId: context.sourceRequestId,
+      },
+    });
+  }
+
+  private buildResponse(
+    trip: TripEntity,
+    distanceMeters: number,
+    candidateDriverIds: string[],
+    dispatchDeferred: boolean,
+  ) {
+    const biddingTtlSeconds = this.config.getOrThrow<number>('BIDDING_TTL_SECONDS');
     return {
       trip_id: trip.id,
       status: trip.status,
       vehicle_type: trip.vehicleType,
-      estimated_distance_meters: Math.round(quote.distanceMeters),
+      estimated_distance_meters: Math.round(distanceMeters),
       estimated_fare: trip.fareAmount,
       currency: trip.currency,
       surge_multiplier: trip.surgeMultiplier,
@@ -111,5 +150,10 @@ export class RidesService {
         deferred: dispatchDeferred,
       },
     };
+  }
+
+  private isUniqueViolation(error: unknown): boolean {
+    if (!(error instanceof QueryFailedError)) return false;
+    return (error.driverError as { code?: string } | undefined)?.code === '23505';
   }
 }
