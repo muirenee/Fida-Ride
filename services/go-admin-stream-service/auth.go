@@ -14,6 +14,7 @@ import (
 const (
 	adminStreamProtocol    = "fida-admin.v1"
 	adminJWTProtocolPrefix = "fida.jwt."
+	adminJWTCookieName     = "fida_admin_access"
 )
 
 type jwtHeader struct {
@@ -30,25 +31,36 @@ type adminJWTClaims struct {
 }
 
 func (s *Server) authenticateAdminStream(r *http.Request) (string, error) {
-	encoded := ""
-	for _, rawProtocol := range strings.Split(r.Header.Get("Sec-WebSocket-Protocol"), ",") {
-		protocol := strings.TrimSpace(rawProtocol)
-		if strings.HasPrefix(protocol, adminJWTProtocolPrefix) {
-			encoded = strings.TrimPrefix(protocol, adminJWTProtocolPrefix)
-			break
-		}
-	}
-	if encoded == "" {
-		return "", errors.New("admin JWT websocket subprotocol is required")
+	token := ""
+	if cookie, err := r.Cookie(adminJWTCookieName); err == nil {
+		token = strings.TrimSpace(cookie.Value)
 	}
 
-	tokenBytes, err := base64.RawURLEncoding.DecodeString(encoded)
-	if err != nil {
-		return "", errors.New("admin JWT subprotocol encoding is invalid")
+	// Subprotocol auth is retained for CLI/testing clients that cannot use the
+	// browser's HttpOnly cookie. The JWT is base64url-wrapped so it remains a valid
+	// WebSocket protocol token and is never placed in the URL/query string.
+	if token == "" {
+		encoded := ""
+		for _, rawProtocol := range strings.Split(r.Header.Get("Sec-WebSocket-Protocol"), ",") {
+			protocol := strings.TrimSpace(rawProtocol)
+			if strings.HasPrefix(protocol, adminJWTProtocolPrefix) {
+				encoded = strings.TrimPrefix(protocol, adminJWTProtocolPrefix)
+				break
+			}
+		}
+		if encoded == "" {
+			return "", errors.New("admin JWT cookie or websocket subprotocol is required")
+		}
+
+		tokenBytes, err := base64.RawURLEncoding.DecodeString(encoded)
+		if err != nil {
+			return "", errors.New("admin JWT subprotocol encoding is invalid")
+		}
+		token = string(tokenBytes)
 	}
 
 	return validateAdminJWT(
-		string(tokenBytes),
+		token,
 		s.cfg.AdminJWTSecret,
 		s.cfg.AdminJWTIssuer,
 		s.cfg.AdminJWTAudience,
