@@ -15,11 +15,12 @@ func TestValidateAdminJWT(t *testing.T) {
 
 	header, _ := json.Marshal(map[string]any{"alg": "HS256", "typ": "JWT"})
 	claims, _ := json.Marshal(map[string]any{
-		"sub":  "admin-001",
-		"role": "admin",
-		"iss":  "fida-ride-admin",
-		"aud":  "fida-admin",
-		"exp":  now.Add(time.Minute).Unix(),
+		"sub":         "admin-001",
+		"role":        "admin",
+		"iss":         "fida-ride-admin",
+		"aud":         "fida-admin",
+		"permissions": []string{"admin:dashboard:read"},
+		"exp":         now.Add(time.Minute).Unix(),
 	})
 
 	headerPart := base64.RawURLEncoding.EncodeToString(header)
@@ -40,6 +41,37 @@ func TestValidateAdminJWT(t *testing.T) {
 	}
 	if subject != "admin-001" {
 		t.Fatalf("unexpected subject %q", subject)
+	}
+}
+
+func TestValidateAdminJWTRejectsMissingDashboardPermission(t *testing.T) {
+	secret := "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	now := time.Unix(1_800_000_000, 0).UTC()
+
+	header, _ := json.Marshal(map[string]any{"alg": "HS256", "typ": "JWT"})
+	claims, _ := json.Marshal(map[string]any{
+		"sub":         "admin-002",
+		"role":        "admin",
+		"iss":         "fida-ride-admin",
+		"aud":         "fida-admin",
+		"permissions": []string{"admin:geofences:write"},
+		"exp":         now.Add(time.Minute).Unix(),
+	})
+
+	headerPart := base64.RawURLEncoding.EncodeToString(header)
+	claimsPart := base64.RawURLEncoding.EncodeToString(claims)
+	mac := hmac.New(sha256.New, []byte(secret))
+	_, _ = mac.Write([]byte(headerPart + "." + claimsPart))
+	token := headerPart + "." + claimsPart + "." + base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+
+	if _, err := validateAdminJWT(
+		token,
+		secret,
+		"fida-ride-admin",
+		"fida-admin",
+		now,
+	); err == nil {
+		t.Fatal("expected admin JWT without dashboard permission to be rejected")
 	}
 }
 
