@@ -22,24 +22,38 @@ final class TelemetryWebSocketClient {
 
   IOWebSocketChannel? _channel;
   StreamSubscription<Object?>? _subscription;
-  Completer<void>? _connecting;
+  Future<void>? _connectFuture;
   Timer? _reconnectTimer;
   String? _pendingPayload;
   bool _disposed = false;
 
   bool get isConnected => _channel != null;
 
-  Future<void> connect() async {
+  Future<void> connect() {
     if (_disposed) {
-      throw StateError('TelemetryWebSocketClient has been disposed.');
+      return Future<void>.error(
+        StateError('TelemetryWebSocketClient has been disposed.'),
+      );
     }
-    if (_channel != null) return;
+    if (_channel != null) return Future<void>.value();
 
-    final Completer<void>? existing = _connecting;
-    if (existing != null) return existing.future;
+    final Future<void>? existing = _connectFuture;
+    if (existing != null) return existing;
 
-    final Completer<void> completer = Completer<void>();
-    _connecting = completer;
+    late final Future<void> future;
+    future = _connectInternal().whenComplete(() {
+      if (identical(_connectFuture, future)) {
+        _connectFuture = null;
+      }
+    });
+    _connectFuture = future;
+    return future;
+  }
+
+  Future<void> _connectInternal() async {
+    if (accessToken.isEmpty) {
+      throw StateError('A driver access token is required for telemetry.');
+    }
 
     try {
       final IOWebSocketChannel channel = IOWebSocketChannel.connect(
@@ -54,7 +68,6 @@ final class TelemetryWebSocketClient {
       await channel.ready;
       if (_disposed) {
         await channel.sink.close();
-        completer.complete();
         return;
       }
 
@@ -69,17 +82,9 @@ final class TelemetryWebSocketClient {
       );
 
       _flushPending();
-      completer.complete();
-    } catch (error, stackTrace) {
-      if (!completer.isCompleted) {
-        completer.completeError(error, stackTrace);
-      }
+    } catch (_) {
       _scheduleReconnect();
       rethrow;
-    } finally {
-      if (identical(_connecting, completer)) {
-        _connecting = null;
-      }
     }
   }
 
