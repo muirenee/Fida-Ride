@@ -87,6 +87,9 @@ jobs:
       - name: Resolve workspace dependencies
         run: flutter pub get
 
+      - name: Verify Dart formatting
+        run: dart format --output=none --set-exit-if-changed apps packages
+
       - name: Analyze mobile workspace
         run: |
           flutter analyze \
@@ -94,7 +97,12 @@ jobs:
             apps/fida_driver \
             packages/fida_api \
             packages/fida_location \
+            packages/fida_security \
             packages/fida_ui
+
+      - name: Test mobile security package
+        working-directory: packages/fida_security
+        run: flutter test
 
       - name: Build Rider APK
         working-directory: apps/fida_rider
