@@ -1,7 +1,9 @@
 import { ForbiddenException, Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { TripEntity } from '../database/entities/trip.entity';
+import { RedisService } from '../redis/redis.service';
 import { UsersService } from '../users/users.service';
 import { RequestRideDto } from './dto/request-ride.dto';
 import { DispatchService } from './dispatch.service';
@@ -17,6 +19,8 @@ export class RidesService {
     private readonly users: UsersService,
     private readonly pricing: PricingService,
     private readonly dispatch: DispatchService,
+    private readonly redis: RedisService,
+    private readonly config: ConfigService,
   ) {}
 
   async requestRide(dto: RequestRideDto) {
@@ -63,12 +67,24 @@ export class RidesService {
         pickupLng: dto.pickup_lng,
         vehicleType: dto.vehicle_type,
       });
+
+      await this.redis.publish(
+        'ride:dispatch:requested',
+        JSON.stringify({
+          trip_id: trip.id,
+          rider_id: rider.id,
+          vehicle_type: dto.vehicle_type,
+          pickup: { lat: dto.pickup_lat, lng: dto.pickup_lng },
+          candidate_driver_ids: candidateDriverIds,
+          requested_at: new Date().toISOString(),
+        }),
+      );
     } catch (error) {
-      // The ride is authoritative in PostgreSQL. A transient Redis failure must not
-      // make the client retry and accidentally create another ride.
+      // PostgreSQL owns the ride state. Cache/broker failure must not make a client
+      // retry an already-created ride; a future dispatch worker can recover it.
       dispatchDeferred = true;
       this.logger.error(
-        `Initial dispatch lookup failed for trip ${trip.id}`,
+        `Initial dispatch failed for trip ${trip.id}`,
         error instanceof Error ? error.stack : String(error),
       );
     }
@@ -82,9 +98,8 @@ export class RidesService {
       currency: trip.currency,
       surge_multiplier: trip.surgeMultiplier,
       dispatch: {
-        radius_km: 5,
+        radius_km: Number(this.config.getOrThrow<string>('DISPATCH_RADIUS_KM')),
         candidate_count: candidateDriverIds.length,
-        candidate_driver_ids: candidateDriverIds,
         deferred: dispatchDeferred,
       },
     };
