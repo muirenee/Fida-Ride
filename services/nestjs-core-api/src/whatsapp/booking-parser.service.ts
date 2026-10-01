@@ -36,6 +36,10 @@ export class BookingParserService {
     return deterministic;
   }
 
+  explicitVehicleTier(rawMessage: string): VehicleType | null {
+    return this.detectVehicleTier(this.normalizeMessage(rawMessage));
+  }
+
   locationCandidate(rawMessage: string): string | null {
     const normalized = this.cleanLocation(this.normalizeMessage(rawMessage));
     if (!normalized || PERSONAL_ALIAS_PATTERN.test(normalized)) return null;
@@ -114,19 +118,19 @@ export class BookingParserService {
       extracted: pickupRaw.length > 0 && dropoffRaw.length > 0,
       pickup_raw: pickupRaw,
       dropoff_raw: dropoffRaw,
-      vehicle_tier: this.extractVehicleTier(message),
+      vehicle_tier: this.detectVehicleTier(message) ?? VehicleType.Taxi,
       confidence_score: confidence,
     });
   }
 
-  private extractVehicleTier(message: string): VehicleType {
+  private detectVehicleTier(message: string): VehicleType | null {
     if (/\b(?:moto|motorcycle|motorbike)\b/i.test(message)) return VehicleType.Moto;
     if (/\b(?:premium|executive|luxury|vip)\b/i.test(message)) return VehicleType.Premium;
     if (/\b(?:tuk[-\s]?tuk|rickshaw)\b/i.test(message)) return VehicleType.TukTuk;
     if (/\b(?:electric|ev)\b/i.test(message)) return VehicleType.Ev;
     if (/\b(?:wheelchair|accessible|accessibility)\b/i.test(message)) return VehicleType.Accessible;
     if (/\b(?:taxi|cab|car|ride)\b/i.test(message)) return VehicleType.Taxi;
-    return VehicleType.Taxi;
+    return null;
   }
 
   private normalizeExtraction(input: BookingExtractionDto): BookingExtractionDto {
