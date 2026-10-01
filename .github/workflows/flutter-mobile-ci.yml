@@ -1,0 +1,129 @@
+name: Flutter Mobile CI
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'apps/**'
+      - 'packages/**'
+      - 'pubspec.yaml'
+      - 'analysis_options.yaml'
+      - '.github/workflows/flutter-mobile-ci.yml'
+  pull_request:
+    paths:
+      - 'apps/**'
+      - 'packages/**'
+      - 'pubspec.yaml'
+      - 'analysis_options.yaml'
+      - '.github/workflows/flutter-mobile-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: flutter-mobile-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze-and-build:
+    name: Analyze and build Android apps
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Flutter stable
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Show Flutter toolchain
+        run: |
+          flutter --version
+          dart --version
+          flutter doctor -v
+
+      - name: Generate ephemeral native runners
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          RIDER_SHELL="$(mktemp -d)"
+          DRIVER_SHELL="$(mktemp -d)"
+
+          flutter create \
+            --platforms=android,ios \
+            --project-name=fida_rider \
+            --org=com.fidalix \
+            --no-pub \
+            "$RIDER_SHELL"
+
+          flutter create \
+            --platforms=android,ios \
+            --project-name=fida_driver \
+            --org=com.fidalix \
+            --no-pub \
+            "$DRIVER_SHELL"
+
+          cp -R "$RIDER_SHELL/android" apps/fida_rider/android
+          cp -R "$RIDER_SHELL/ios" apps/fida_rider/ios
+          cp "$RIDER_SHELL/.metadata" apps/fida_rider/.metadata
+
+          cp -R "$DRIVER_SHELL/android" apps/fida_driver/android
+          cp -R "$DRIVER_SHELL/ios" apps/fida_driver/ios
+          cp "$DRIVER_SHELL/.metadata" apps/fida_driver/.metadata
+
+      - name: Resolve workspace dependencies
+        run: flutter pub get
+
+      - name: Analyze mobile workspace
+        run: |
+          flutter analyze \
+            apps/fida_rider \
+            apps/fida_driver \
+            packages/fida_api \
+            packages/fida_location \
+            packages/fida_ui
+
+      - name: Build Rider APK
+        working-directory: apps/fida_rider
+        run: flutter build apk --release
+
+      - name: Build Driver APK
+        working-directory: apps/fida_driver
+        run: flutter build apk --release
+
+      - name: Stage APK artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          cp apps/fida_rider/build/app/outputs/flutter-apk/app-release.apk artifacts/fida-rider-release.apk
+          cp apps/fida_driver/build/app/outputs/flutter-apk/app-release.apk artifacts/fida-driver-release.apk
+
+      - name: Upload Rider APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: fida-rider-apk
+          path: artifacts/fida-rider-release.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload Driver APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: fida-driver-apk
+          path: artifacts/fida-driver-release.apk
+          if-no-files-found: error
+          retention-days: 14
