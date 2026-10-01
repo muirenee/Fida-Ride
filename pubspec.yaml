@@ -1,0 +1,12 @@
+name: fida_ride_workspace
+publish_to: none
+
+environment:
+  sdk: ^3.13.0
+
+workspace:
+  - apps/fida_rider
+  - apps/fida_driver
+  - packages/fida_api
+  - packages/fida_location
+  - packages/fida_ui
