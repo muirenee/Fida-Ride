@@ -87,7 +87,7 @@ export class DriverFinancialService {
 
     const balance = new Decimal(row.balance);
     const creditLimit = new Decimal(
-      this.config.getOrThrow<string>('DRIVER_NEGATIVE_CREDIT_LIMIT'),
+      this.config.get<string>('DRIVER_NEGATIVE_CREDIT_LIMIT', '15000'),
     );
     const minimumAllowed = creditLimit.negated();
     const blocked = balance.lt(minimumAllowed);
@@ -116,7 +116,7 @@ export class DriverFinancialService {
       return;
     }
 
-    const ttlSeconds = this.config.getOrThrow<number>('DRIVER_FINANCIAL_BLOCK_TTL_SECONDS');
+    const ttlSeconds = this.config.get<number>('DRIVER_FINANCIAL_BLOCK_TTL_SECONDS', 86400);
     await this.redis.setEx(
       key,
       ttlSeconds,
