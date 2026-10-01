@@ -46,6 +46,20 @@ export function validateEnvironment(env: Env): Record<string, unknown> {
     throw new Error('OTP_HMAC_SECRET must contain at least 32 characters');
   }
 
+  const fraudEnabled = boolean(env, 'FRAUD_DETECTION_ENABLED', false);
+  let fraudDeviceHmacSecret = optionalString(env, 'FRAUD_DEVICE_HMAC_SECRET');
+  if (fraudEnabled) {
+    fraudDeviceHmacSecret = requiredString(env, 'FRAUD_DEVICE_HMAC_SECRET');
+    if (fraudDeviceHmacSecret.length < 32) {
+      throw new Error('FRAUD_DEVICE_HMAC_SECRET must contain at least 32 characters');
+    }
+  }
+  const fraudFlagThreshold = integer(env, 'FRAUD_FLAG_THRESHOLD', 70, 1);
+  const fraudSuspendThreshold = integer(env, 'FRAUD_SUSPEND_THRESHOLD', 90, 1);
+  if (fraudFlagThreshold >= fraudSuspendThreshold) {
+    throw new Error('FRAUD_FLAG_THRESHOLD must be less than FRAUD_SUSPEND_THRESHOLD');
+  }
+
   const whatsappEnabled = boolean(env, 'WHATSAPP_BOT_ENABLED', false);
   const whatsappLlmEnabled = boolean(env, 'WHATSAPP_BOOKING_LLM_ENABLED', false);
 
@@ -109,6 +123,20 @@ export function validateEnvironment(env: Env): Record<string, unknown> {
     DISPATCH_CANDIDATE_LIMIT: integer(env, 'DISPATCH_CANDIDATE_LIMIT', 100, 1),
     BIDDING_TTL_SECONDS: integer(env, 'BIDDING_TTL_SECONDS', 120, 30),
     BIDDING_ACCEPT_LOCK_TTL_MS: integer(env, 'BIDDING_ACCEPT_LOCK_TTL_MS', 10000, 1000),
+    FRAUD_DETECTION_ENABLED: fraudEnabled,
+    FRAUD_DEVICE_HMAC_SECRET: fraudDeviceHmacSecret,
+    FRAUD_RISK_WINDOW_SECONDS: integer(env, 'FRAUD_RISK_WINDOW_SECONDS', 900, 60),
+    FRAUD_DEVICE_BIND_TTL_SECONDS: integer(env, 'FRAUD_DEVICE_BIND_TTL_SECONDS', 120, 30),
+    FRAUD_DEVICE_CLOCK_SKEW_MS: integer(env, 'FRAUD_DEVICE_CLOCK_SKEW_MS', 300000, 1000),
+    FRAUD_ACCOUNT_STATE_CACHE_SECONDS: integer(env, 'FRAUD_ACCOUNT_STATE_CACHE_SECONDS', 60, 5),
+    FRAUD_BLOCK_CACHE_TTL_SECONDS: integer(env, 'FRAUD_BLOCK_CACHE_TTL_SECONDS', 86400, 60),
+    FRAUD_FLAG_THRESHOLD: fraudFlagThreshold,
+    FRAUD_SUSPEND_THRESHOLD: fraudSuspendThreshold,
+    FRAUD_WEIGHT_DEVICE_PARALLEL_ACCOUNT: integer(env, 'FRAUD_WEIGHT_DEVICE_PARALLEL_ACCOUNT', 45, 1),
+    FRAUD_WEIGHT_DEVICE_CLOCK_SKEW: integer(env, 'FRAUD_WEIGHT_DEVICE_CLOCK_SKEW', 20, 1),
+    FRAUD_WEIGHT_INVALID_DEVICE_TIMESTAMP: integer(env, 'FRAUD_WEIGHT_INVALID_DEVICE_TIMESTAMP', 15, 1),
+    FRAUD_WEIGHT_MOCK_LOCATION: integer(env, 'FRAUD_WEIGHT_MOCK_LOCATION', 70, 1),
+    FRAUD_WEIGHT_VELOCITY_JUMP: integer(env, 'FRAUD_WEIGHT_VELOCITY_JUMP', 50, 1),
     SURGE_PRICING_ENABLED: surgeEnabled,
     SURGE_REFRESH_INTERVAL_MS: surgeRefreshIntervalMs,
     SURGE_REFRESH_LOCK_TTL_MS: surgeRefreshLockTtlMs,
