@@ -149,6 +149,7 @@ func main() {
 	mux.HandleFunc("/healthz", s.healthHandler)
 	mux.HandleFunc("/readyz", s.healthHandler)
 	mux.HandleFunc("/ws/driver", s.driverWebSocketHandler)
+	mux.HandleFunc("/ws/rider", s.riderWebSocketHandler)
 
 	httpServer := &http.Server{
 		Addr:              cfg.Addr,
@@ -162,6 +163,7 @@ func main() {
 	defer stop()
 
 	go s.runStaleDriverJanitor(ctx)
+	go s.runBiddingEventSubscriber(ctx)
 
 	serverErr := make(chan error, 1)
 	go func() {
@@ -188,6 +190,7 @@ func main() {
 	defer cancelShutdown()
 
 	s.closeAllConnections("server shutting down")
+	s.closeAllRiderConnections("server shutting down")
 	if err := httpServer.Shutdown(shutdownCtx); err != nil {
 		logger.Error("http server shutdown failed", "error", err)
 	}
