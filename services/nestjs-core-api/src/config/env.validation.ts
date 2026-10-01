@@ -72,6 +72,18 @@ export function validateEnvironment(env: Env): Record<string, unknown> {
     llmModel = requiredString(env, 'WHATSAPP_BOOKING_LLM_MODEL');
   }
 
+  const surgeEnabled = boolean(env, 'SURGE_PRICING_ENABLED', false);
+  const surgeRefreshIntervalMs = integer(env, 'SURGE_REFRESH_INTERVAL_MS', 10000, 1000);
+  const surgeRefreshLockTtlMs = integer(env, 'SURGE_REFRESH_LOCK_TTL_MS', 30000, 1000);
+  const surgeStartMultiplier = decimal(env, 'SURGE_START_MULTIPLIER', 1.2, 1, 5);
+  const surgeMaxMultiplier = decimal(env, 'SURGE_MAX_MULTIPLIER', 3, 1, 5);
+  if (surgeStartMultiplier > surgeMaxMultiplier) {
+    throw new Error('SURGE_START_MULTIPLIER must be <= SURGE_MAX_MULTIPLIER');
+  }
+  if (surgeRefreshLockTtlMs < surgeRefreshIntervalMs) {
+    throw new Error('SURGE_REFRESH_LOCK_TTL_MS must be >= SURGE_REFRESH_INTERVAL_MS');
+  }
+
   return {
     ...env,
     NODE_ENV: String(env.NODE_ENV ?? 'development'),
@@ -97,6 +109,19 @@ export function validateEnvironment(env: Env): Record<string, unknown> {
     DISPATCH_CANDIDATE_LIMIT: integer(env, 'DISPATCH_CANDIDATE_LIMIT', 100, 1),
     BIDDING_TTL_SECONDS: integer(env, 'BIDDING_TTL_SECONDS', 120, 30),
     BIDDING_ACCEPT_LOCK_TTL_MS: integer(env, 'BIDDING_ACCEPT_LOCK_TTL_MS', 10000, 1000),
+    SURGE_PRICING_ENABLED: surgeEnabled,
+    SURGE_REFRESH_INTERVAL_MS: surgeRefreshIntervalMs,
+    SURGE_REFRESH_LOCK_TTL_MS: surgeRefreshLockTtlMs,
+    SURGE_CACHE_TTL_SECONDS: integer(env, 'SURGE_CACHE_TTL_SECONDS', 45, 5),
+    SURGE_DEMAND_WINDOW_SECONDS: integer(env, 'SURGE_DEMAND_WINDOW_SECONDS', 600, 30),
+    SURGE_RATIO_THRESHOLD: decimal(env, 'SURGE_RATIO_THRESHOLD', 1.5, 0.1, 100),
+    SURGE_START_MULTIPLIER: surgeStartMultiplier,
+    SURGE_MAX_MULTIPLIER: surgeMaxMultiplier,
+    SURGE_PROGRESSIVE_SLOPE: decimal(env, 'SURGE_PROGRESSIVE_SLOPE', 0.4, 0, 10),
+    SURGE_DRIVER_PREFILTER_LIMIT: integer(env, 'SURGE_DRIVER_PREFILTER_LIMIT', 20000, 100),
+    SURGE_DB_STATEMENT_TIMEOUT_MS: integer(env, 'SURGE_DB_STATEMENT_TIMEOUT_MS', 1500, 100),
+    SURGE_DB_LOCK_TIMEOUT_MS: integer(env, 'SURGE_DB_LOCK_TIMEOUT_MS', 100, 10),
+    SURGE_DB_IDLE_TX_TIMEOUT_MS: integer(env, 'SURGE_DB_IDLE_TX_TIMEOUT_MS', 3000, 500),
     WHATSAPP_BOT_ENABLED: whatsappEnabled,
     WHATSAPP_VERIFY_TOKEN: whatsappVerifyToken,
     WHATSAPP_APP_SECRET: whatsappAppSecret,

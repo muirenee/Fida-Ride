@@ -4,6 +4,12 @@ import { createClient } from 'redis';
 
 const BIDDING_EVENTS_CHANNEL = 'bidding:events';
 
+export interface RedisGeoMemberPosition {
+  member: string;
+  longitude: number;
+  latitude: number;
+}
+
 const recordCounterOfferScript = `
 local state = redis.call('GET', KEYS[1])
 if state ~= 'broadcasted' and state ~= 'counter_offers_received' then
@@ -89,6 +95,18 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     return this.client.setEx(key, ttlSeconds, value);
   }
 
+  async setExMany(
+    entries: Array<{ key: string; ttlSeconds: number; value: string }>,
+  ): Promise<void> {
+    if (entries.length === 0) return;
+
+    const transaction = this.client.multi();
+    for (const entry of entries) {
+      transaction.setEx(entry.key, entry.ttlSeconds, entry.value);
+    }
+    await transaction.exec();
+  }
+
   async del(...keys: string[]): Promise<number> {
     if (keys.length === 0) return 0;
     return this.client.del(keys);
@@ -122,6 +140,37 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     );
 
     return reply.map((member) => String(member));
+  }
+
+  async geoSearchWithCoordinates(
+    key: string,
+    longitude: number,
+    latitude: number,
+    radiusKm: number,
+    limit: number,
+  ): Promise<RedisGeoMemberPosition[]> {
+    const members = await this.geoSearch(key, longitude, latitude, radiusKm, limit);
+    if (members.length === 0) return [];
+
+    const positions = await this.client.geoPos(key, members);
+    const result: RedisGeoMemberPosition[] = [];
+
+    for (let index = 0; index < members.length; index += 1) {
+      const position = positions[index];
+      if (!position) continue;
+
+      const memberLongitude = Number(position.longitude);
+      const memberLatitude = Number(position.latitude);
+      if (!Number.isFinite(memberLongitude) || !Number.isFinite(memberLatitude)) continue;
+
+      result.push({
+        member: members[index],
+        longitude: memberLongitude,
+        latitude: memberLatitude,
+      });
+    }
+
+    return result;
   }
 
   async openBidding(tripId: string, eligibleDriverIds: string[], ttlSeconds: number): Promise<void> {
