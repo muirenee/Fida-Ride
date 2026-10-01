@@ -60,6 +60,14 @@ export function validateEnvironment(env: Env): Record<string, unknown> {
     throw new Error('FRAUD_FLAG_THRESHOLD must be less than FRAUD_SUSPEND_THRESHOLD');
   }
 
+  const attestationEnabled = boolean(env, 'ATTESTATION_ENFORCEMENT_ENABLED', false);
+  let playIntegrityServiceAccountJson = optionalString(env, 'PLAY_INTEGRITY_SERVICE_ACCOUNT_JSON');
+  let appleTeamId = optionalString(env, 'APPLE_APP_ATTEST_TEAM_ID');
+  if (attestationEnabled) {
+    playIntegrityServiceAccountJson = requiredString(env, 'PLAY_INTEGRITY_SERVICE_ACCOUNT_JSON');
+    appleTeamId = requiredString(env, 'APPLE_APP_ATTEST_TEAM_ID');
+  }
+
   const whatsappEnabled = boolean(env, 'WHATSAPP_BOT_ENABLED', false);
   const whatsappLlmEnabled = boolean(env, 'WHATSAPP_BOOKING_LLM_ENABLED', false);
 
@@ -123,6 +131,21 @@ export function validateEnvironment(env: Env): Record<string, unknown> {
     DISPATCH_CANDIDATE_LIMIT: integer(env, 'DISPATCH_CANDIDATE_LIMIT', 100, 1),
     BIDDING_TTL_SECONDS: integer(env, 'BIDDING_TTL_SECONDS', 120, 30),
     BIDDING_ACCEPT_LOCK_TTL_MS: integer(env, 'BIDDING_ACCEPT_LOCK_TTL_MS', 10000, 1000),
+    TELEMETRY_SESSION_TTL_SECONDS: integer(env, 'TELEMETRY_SESSION_TTL_SECONDS', 900, 60),
+    ATTESTATION_ENFORCEMENT_ENABLED: attestationEnabled,
+    ATTESTATION_CHALLENGE_TTL_SECONDS: integer(env, 'ATTESTATION_CHALLENGE_TTL_SECONDS', 120, 30),
+    ATTESTATION_TICKET_TTL_SECONDS: integer(env, 'ATTESTATION_TICKET_TTL_SECONDS', 90, 15),
+    ATTESTATION_PROVIDER_TIMEOUT_MS: integer(env, 'ATTESTATION_PROVIDER_TIMEOUT_MS', 8000, 1000),
+    PLAY_INTEGRITY_SERVICE_ACCOUNT_JSON: playIntegrityServiceAccountJson,
+    ANDROID_RIDER_PACKAGE_NAME: optionalString(env, 'ANDROID_RIDER_PACKAGE_NAME', 'com.fidalix.fida_rider'),
+    ANDROID_DRIVER_PACKAGE_NAME: optionalString(env, 'ANDROID_DRIVER_PACKAGE_NAME', 'com.fidalix.fida_driver'),
+    PLAY_INTEGRITY_MAX_AGE_MS: integer(env, 'PLAY_INTEGRITY_MAX_AGE_MS', 120000, 10000),
+    PLAY_INTEGRITY_REQUIRE_LICENSED: boolean(env, 'PLAY_INTEGRITY_REQUIRE_LICENSED', true),
+    PLAY_INTEGRITY_REQUIRE_STRONG: boolean(env, 'PLAY_INTEGRITY_REQUIRE_STRONG', false),
+    APPLE_APP_ATTEST_TEAM_ID: appleTeamId,
+    APPLE_RIDER_BUNDLE_ID: optionalString(env, 'APPLE_RIDER_BUNDLE_ID', 'com.fidalix.fida_rider'),
+    APPLE_DRIVER_BUNDLE_ID: optionalString(env, 'APPLE_DRIVER_BUNDLE_ID', 'com.fidalix.fida_driver'),
+    APPLE_APP_ATTEST_ALLOW_DEVELOPMENT: boolean(env, 'APPLE_APP_ATTEST_ALLOW_DEVELOPMENT', false),
     FRAUD_DETECTION_ENABLED: fraudEnabled,
     FRAUD_DEVICE_HMAC_SECRET: fraudDeviceHmacSecret,
     FRAUD_RISK_WINDOW_SECONDS: integer(env, 'FRAUD_RISK_WINDOW_SECONDS', 900, 60),
