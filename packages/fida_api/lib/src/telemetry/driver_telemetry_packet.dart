@@ -5,6 +5,10 @@ final class DriverTelemetryPacket {
     required this.longitude,
     required this.bearing,
     required this.status,
+    required this.sessionId,
+    required this.timestamp,
+    required this.sequence,
+    required this.signature,
   });
 
   final String driverId;
@@ -12,6 +16,12 @@ final class DriverTelemetryPacket {
   final double longitude;
   final double bearing;
   final String status;
+  final String sessionId;
+
+  /// Unix epoch milliseconds, signed as part of the telemetry envelope.
+  final int timestamp;
+  final int sequence;
+  final String signature;
 
   Map<String, Object> toJson() => <String, Object>{
     'driver_id': driverId,
@@ -19,5 +29,9 @@ final class DriverTelemetryPacket {
     'longitude': longitude,
     'bearing': bearing,
     'status': status,
+    'session_id': sessionId,
+    'timestamp': timestamp,
+    'sequence': sequence,
+    'signature': signature,
   };
 }
