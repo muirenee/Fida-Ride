@@ -56,5 +56,7 @@ export function validateEnvironment(env: Env): Record<string, unknown> {
     RIDE_PER_KM_RWF: String(env.RIDE_PER_KM_RWF ?? '500'),
     DISPATCH_RADIUS_KM: String(env.DISPATCH_RADIUS_KM ?? '5'),
     DISPATCH_CANDIDATE_LIMIT: integer(env, 'DISPATCH_CANDIDATE_LIMIT', 100, 1),
+    BIDDING_TTL_SECONDS: integer(env, 'BIDDING_TTL_SECONDS', 120, 30),
+    BIDDING_ACCEPT_LOCK_TTL_MS: integer(env, 'BIDDING_ACCEPT_LOCK_TTL_MS', 10000, 1000),
   };
 }
