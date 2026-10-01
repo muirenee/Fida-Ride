@@ -8,9 +8,9 @@ final class DriverTelemetryPublisher implements LocationPublisher {
     required TelemetryWebSocketClient telemetryClient,
     required String driverId,
     DriverStatusProvider? statusProvider,
-  })  : _telemetryClient = telemetryClient,
-        _driverId = driverId,
-        _statusProvider = statusProvider ?? _defaultStatus;
+  }) : _telemetryClient = telemetryClient,
+       _driverId = driverId,
+       _statusProvider = statusProvider ?? _defaultStatus;
 
   final TelemetryWebSocketClient _telemetryClient;
   final String _driverId;
