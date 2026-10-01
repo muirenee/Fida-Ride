@@ -14,6 +14,7 @@ import * as argon2 from 'argon2';
 import { DataSource } from 'typeorm';
 import { RedisService } from '../redis/redis.service';
 import { AdminJwtPrincipal, AdminRole } from './admin-auth.types';
+import { adminBoolean, adminInteger, adminString } from './admin-config';
 import { AdminSessionService } from './admin-session.service';
 import { AdminLoginDto } from './dto/admin-login.dto';
 
@@ -57,8 +58,12 @@ export class AdminAuthService implements OnModuleInit {
   }
 
   assertSecureTransport(headers: Record<string, string | string[] | undefined>): void {
-    const nodeEnv = this.config.get<string>('NODE_ENV', 'development');
-    const requireHttps = this.config.get<boolean>('ADMIN_REQUIRE_HTTPS', nodeEnv === 'production');
+    const nodeEnv = String(this.config.get<unknown>('NODE_ENV') ?? 'development');
+    const requireHttps = adminBoolean(
+      this.config,
+      'ADMIN_REQUIRE_HTTPS',
+      nodeEnv === 'production',
+    );
     if (!requireHttps) return;
 
     const raw = headers['x-forwarded-proto'];
@@ -139,7 +144,13 @@ export class AdminAuthService implements OnModuleInit {
       jti: randomUUID(),
     };
 
-    const ttlSeconds = this.config.get<number>('ADMIN_JWT_ACCESS_TTL_SECONDS', 900);
+    const ttlSeconds = adminInteger(
+      this.config,
+      'ADMIN_JWT_ACCESS_TTL_SECONDS',
+      900,
+      60,
+      86_400,
+    );
     const accessToken = await this.jwt.signAsync(
       {
         role: principal.role,
@@ -147,12 +158,12 @@ export class AdminAuthService implements OnModuleInit {
         sid: principal.sid,
       },
       {
-        secret: this.config.getOrThrow<string>('ADMIN_JWT_HS256_SECRET'),
+        secret: adminString(this.config, 'ADMIN_JWT_HS256_SECRET', '', 32),
         algorithm: 'HS256',
         subject: principal.sub,
         jwtid: principal.jti,
-        issuer: this.config.get<string>('ADMIN_JWT_ISSUER', 'fida-ride-admin'),
-        audience: this.config.get<string>('ADMIN_JWT_AUDIENCE', 'fida-admin'),
+        issuer: adminString(this.config, 'ADMIN_JWT_ISSUER', 'fida-ride-admin', 1),
+        audience: adminString(this.config, 'ADMIN_JWT_AUDIENCE', 'fida-admin', 1),
         expiresIn: ttlSeconds,
       },
     );
@@ -164,9 +175,27 @@ export class AdminAuthService implements OnModuleInit {
   }
 
   private async enforceRateLimit(username: string, ip: string): Promise<void> {
-    const windowSeconds = this.config.get<number>('ADMIN_LOGIN_RATE_WINDOW_SECONDS', 900);
-    const perAccountMax = this.config.get<number>('ADMIN_LOGIN_RATE_ACCOUNT_MAX', 10);
-    const perIpMax = this.config.get<number>('ADMIN_LOGIN_RATE_IP_MAX', 30);
+    const windowSeconds = adminInteger(
+      this.config,
+      'ADMIN_LOGIN_RATE_WINDOW_SECONDS',
+      900,
+      60,
+      86_400,
+    );
+    const perAccountMax = adminInteger(
+      this.config,
+      'ADMIN_LOGIN_RATE_ACCOUNT_MAX',
+      10,
+      1,
+      1_000,
+    );
+    const perIpMax = adminInteger(
+      this.config,
+      'ADMIN_LOGIN_RATE_IP_MAX',
+      30,
+      1,
+      10_000,
+    );
 
     const [accountScore, ipScore] = await Promise.all([
       this.redis.addScoreWithTtl(
@@ -187,8 +216,20 @@ export class AdminAuthService implements OnModuleInit {
   }
 
   private async registerFailedLogin(accountId: string): Promise<void> {
-    const maxFailures = this.config.get<number>('ADMIN_LOGIN_MAX_FAILURES', 5);
-    const lockSeconds = this.config.get<number>('ADMIN_LOGIN_LOCK_SECONDS', 900);
+    const maxFailures = adminInteger(
+      this.config,
+      'ADMIN_LOGIN_MAX_FAILURES',
+      5,
+      1,
+      100,
+    );
+    const lockSeconds = adminInteger(
+      this.config,
+      'ADMIN_LOGIN_LOCK_SECONDS',
+      900,
+      30,
+      86_400,
+    );
 
     await this.db.query(
       `
@@ -217,9 +258,12 @@ export class AdminAuthService implements OnModuleInit {
   }
 
   private fingerprint(value: string): string {
-    const secret = this.config.get<string>(
+    const jwtSecret = adminString(this.config, 'ADMIN_JWT_HS256_SECRET', '', 32);
+    const secret = adminString(
+      this.config,
       'ADMIN_LOGIN_RATE_HMAC_SECRET',
-      this.config.getOrThrow<string>('ADMIN_JWT_HS256_SECRET'),
+      jwtSecret,
+      32,
     );
     return createHmac('sha256', secret).update(`fida-admin-rate:${value}`).digest('hex');
   }
