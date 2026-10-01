@@ -47,5 +47,5 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add services/nestjs-core-api/package-lock.json apps packages
-          git commit -m 'chore: normalize mobile security sources'
+          git commit -m 'chore: finalize mobile security formatting'
           git push origin HEAD:main
