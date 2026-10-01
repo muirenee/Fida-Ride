@@ -15,6 +15,7 @@ import (
 const (
 	telemetryUpdatesChannel    = "driver:updates:active"
 	biddingEventsChannel       = "bidding:events"
+	adminSessionRevokedChannel = "admin:session:revoked"
 	availableDriverCountKey    = "admin:available-driver-count"
 	maxAdminControlFrameBytes  = 2 * 1024
 	availableDriverStaleAfter  = 30 * time.Second
@@ -33,6 +34,10 @@ type BiddingEvent struct {
 	Event    string `json:"event"`
 	TripID   string `json:"trip_id"`
 	DriverID string `json:"driver_id"`
+}
+
+type AdminSessionRevokedEvent struct {
+	SessionID string `json:"sid"`
 }
 
 type AdminDriverUpdate struct {
@@ -56,8 +61,9 @@ type adminControlMessage struct {
 }
 
 type adminStreamClient struct {
-	conn *websocket.Conn
-	send chan []byte
+	conn      *websocket.Conn
+	send      chan []byte
+	sessionID string
 
 	mu          sync.RWMutex
 	viewport    adminViewport
@@ -98,6 +104,19 @@ func (h *AdminStreamHub) unregister(client *adminStreamClient) {
 	h.mu.Lock()
 	delete(h.clients, client)
 	h.mu.Unlock()
+}
+
+func (h *AdminStreamHub) closeSession(sessionID string) {
+	if sessionID == "" {
+		return
+	}
+	for _, client := range h.snapshotClients() {
+		if client.sessionID != sessionID {
+			continue
+		}
+		_ = writeClose(client.conn, websocket.ClosePolicyViolation, "session revoked")
+		_ = client.conn.Close()
+	}
 }
 
 func (h *AdminStreamHub) setActiveTrip(driverID, tripID string) {
@@ -198,7 +217,6 @@ func (client *adminStreamClient) enqueue(payload []byte) {
 	default:
 	}
 
-	// A slow dashboard receives the newest frame instead of accumulating stale GPS frames.
 	select {
 	case <-client.send:
 	default:
@@ -210,21 +228,25 @@ func (client *adminStreamClient) enqueue(payload []byte) {
 }
 
 func (s *Server) adminStreamHandler(w http.ResponseWriter, r *http.Request) {
-	adminID, err := s.authenticateAdminStream(r)
+	principal, err := s.authenticateAdminStream(r)
 	if err != nil {
-		s.logger.Warn("admin stream authentication rejected", "remote_ip", r.RemoteAddr, "error", err)
+		s.logger.Warn("admin stream authentication rejected", "remote_ip", r.RemoteAddr)
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 
 	conn, err := s.upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		s.logger.Warn("admin websocket upgrade failed", "admin_id", adminID, "error", err)
+		s.logger.Warn("admin websocket upgrade failed", "admin_id", principal.Subject)
 		return
 	}
 	defer conn.Close()
 
-	client := &adminStreamClient{conn: conn, send: make(chan []byte, 2)}
+	client := &adminStreamClient{
+		conn:      conn,
+		send:      make(chan []byte, 2),
+		sessionID: principal.SessionID,
+	}
 	s.hub.register(client)
 	defer s.hub.unregister(client)
 
@@ -296,7 +318,7 @@ func validAdminViewport(viewport adminViewport) bool {
 }
 
 func (s *Server) runTelemetrySubscriber(ctx context.Context) {
-	pubsub := s.redis.Subscribe(ctx, telemetryUpdatesChannel, biddingEventsChannel)
+	pubsub := s.redis.Subscribe(ctx, telemetryUpdatesChannel, biddingEventsChannel, adminSessionRevokedChannel)
 	defer func() { _ = pubsub.Close() }()
 
 	if _, err := pubsub.Receive(ctx); err != nil {
@@ -339,6 +361,12 @@ func (s *Server) runTelemetrySubscriber(ctx context.Context) {
 			}
 
 			switch message.Channel {
+			case adminSessionRevokedChannel:
+				var event AdminSessionRevokedEvent
+				if err := json.Unmarshal([]byte(message.Payload), &event); err != nil {
+					continue
+				}
+				s.hub.closeSession(event.SessionID)
 			case biddingEventsChannel:
 				var event BiddingEvent
 				if err := json.Unmarshal([]byte(message.Payload), &event); err != nil {
