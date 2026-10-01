@@ -130,7 +130,6 @@ final class DeviceAttestationService {
         challengeId: challengeId,
         requestHash: requestHash,
         clientData: clientData,
-        allowKeyRegeneration: true,
       );
     }
 
@@ -188,7 +187,6 @@ final class DeviceAttestationService {
     required String challengeId,
     required String requestHash,
     required String clientData,
-    required bool allowKeyRegeneration,
   }) async {
     final bool supported =
         await _channel.invokeMethod<bool>('iosIsAppAttestSupported') ?? false;
@@ -275,15 +273,14 @@ final class DeviceAttestationService {
       );
       return _ticketFromResponse(response, action, installationId);
     } on FidaApiException catch (error) {
-      if (allowKeyRegeneration && error.statusCode == HttpStatus.unauthorized) {
+      if (error.statusCode == HttpStatus.unauthorized) {
+        // The server challenge has already been consumed. Reset the local key,
+        // then fail closed so the caller starts a completely fresh attestation
+        // attempt with a new challenge instead of replaying this one.
         await _deleteIosKeyId();
-        return _verifyIos(
-          action: action,
-          installationId: installationId,
-          challengeId: challengeId,
-          requestHash: requestHash,
-          clientData: clientData,
-          allowKeyRegeneration: false,
+        throw DeviceAttestationException(
+          'App Attest key was rejected and reset. Retry the protected action to obtain a fresh challenge.',
+          error,
         );
       }
       throw DeviceAttestationException(
