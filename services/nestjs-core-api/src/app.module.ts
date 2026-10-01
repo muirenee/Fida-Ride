@@ -9,6 +9,7 @@ import { DriverEntity } from './database/entities/driver.entity';
 import { TripEntity } from './database/entities/trip.entity';
 import { UserEntity } from './database/entities/user.entity';
 import { WhatsAppInboxEntity } from './database/entities/whatsapp-inbox.entity';
+import { FinanceModule } from './finance/finance.module';
 import { FraudModule } from './fraud/fraud.module';
 import { HealthController } from './health.controller';
 import { RedisModule } from './redis/redis.module';
@@ -46,6 +47,7 @@ import { WhatsAppModule } from './whatsapp/whatsapp.module';
     RedisModule,
     AttestationModule,
     FraudModule,
+    FinanceModule,
     UsersModule,
     AuthModule,
     RidesModule,
