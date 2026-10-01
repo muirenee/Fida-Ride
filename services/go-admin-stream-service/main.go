@@ -193,7 +193,7 @@ func (s *Server) healthHandler(w http.ResponseWriter, _ *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(`{"status":"ok","service":"go-admin-stream-service"}`))
+	_, _ = w.Write([]byte("{\"status\":\"ok\",\"service\":\"go-admin-stream-service\"}"))
 }
 
 func (s *Server) checkOrigin(r *http.Request) bool {
