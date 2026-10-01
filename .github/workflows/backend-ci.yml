@@ -71,6 +71,12 @@ jobs:
             exit 1
           fi
 
+      - name: Resolve modules
+        run: |
+          go mod tidy
+          echo '--- go.sum ---'
+          cat go.sum
+
       - name: Test
         run: go test ./...
 
