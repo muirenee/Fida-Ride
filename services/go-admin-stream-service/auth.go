@@ -12,9 +12,11 @@ import (
 )
 
 const (
-	adminStreamProtocol    = "fida-admin.v1"
-	adminJWTProtocolPrefix = "fida.jwt."
-	adminJWTCookieName     = "fida_admin_access"
+	adminStreamProtocol       = "fida-admin.v1"
+	adminJWTProtocolPrefix    = "fida.jwt."
+	adminJWTCookieName        = "fida_admin_access"
+	adminDashboardPermission  = "admin:dashboard:read"
+	adminWildcardPermission   = "admin:*"
 )
 
 type jwtHeader struct {
@@ -22,12 +24,13 @@ type jwtHeader struct {
 }
 
 type adminJWTClaims struct {
-	Subject   string          `json:"sub"`
-	Role      string          `json:"role"`
-	Issuer    string          `json:"iss"`
-	Audience  json.RawMessage `json:"aud"`
-	Expiry    int64           `json:"exp"`
-	NotBefore int64           `json:"nbf"`
+	Subject     string          `json:"sub"`
+	Role        string          `json:"role"`
+	Issuer      string          `json:"iss"`
+	Audience    json.RawMessage `json:"aud"`
+	Permissions []string        `json:"permissions"`
+	Expiry      int64           `json:"exp"`
+	NotBefore   int64           `json:"nbf"`
 }
 
 func (s *Server) authenticateAdminStream(r *http.Request) (string, error) {
@@ -105,6 +108,9 @@ func validateAdminJWT(token, secret, issuer, audience string, now time.Time) (st
 	if claims.Role != "admin" {
 		return "", errors.New("admin role required")
 	}
+	if !hasAdminPermission(claims.Permissions, adminDashboardPermission) {
+		return "", errors.New("admin dashboard permission required")
+	}
 	if claims.Issuer != issuer {
 		return "", errors.New("admin JWT issuer mismatch")
 	}
@@ -123,6 +129,15 @@ func validateAdminJWT(token, secret, issuer, audience string, now time.Time) (st
 		return "", errors.New("admin JWT subject is invalid")
 	}
 	return subject, nil
+}
+
+func hasAdminPermission(permissions []string, required string) bool {
+	for _, permission := range permissions {
+		if permission == required || permission == adminWildcardPermission {
+			return true
+		}
+	}
+	return false
 }
 
 func rawAudienceContains(raw json.RawMessage, expected string) bool {
