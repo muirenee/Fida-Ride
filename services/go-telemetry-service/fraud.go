@@ -19,9 +19,9 @@ const (
 )
 
 var (
-	telemetryFraudSettingsOnce sync.Once
+	telemetryFraudSettingsOnce  sync.Once
 	telemetryFraudSettingsValue telemetryFraudSettings
-	telemetryFraudSettingsErr error
+	telemetryFraudSettingsErr   error
 )
 
 type telemetryFraudSettings struct {
