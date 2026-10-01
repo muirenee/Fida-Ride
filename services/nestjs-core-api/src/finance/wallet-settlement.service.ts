@@ -103,13 +103,11 @@ export class WalletSettlementService {
         throw new ConflictException('Completed trip fare must be greater than zero');
       }
 
-      const commissionRate = new Decimal(
-        this.config.getOrThrow<string>('PLATFORM_COMMISSION_RATE'),
-      );
+      const commissionRate = this.commissionRate();
       const commission = gross.mul(commissionRate).toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
       const driverNet = gross.minus(commission).toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
 
-      if (commission.lt(0) || driverNet.lte(0)) {
+      if (commission.lte(0) || driverNet.lte(0)) {
         throw new ConflictException('Settlement commission configuration is invalid');
       }
 
@@ -343,6 +341,14 @@ export class WalletSettlementService {
     return result;
   }
 
+  private commissionRate(): Decimal {
+    const rate = new Decimal(this.config.get<string>('PLATFORM_COMMISSION_RATE', '0.15'));
+    if (!rate.isFinite() || rate.lte(0) || rate.gte(1)) {
+      throw new ConflictException('PLATFORM_COMMISSION_RATE must be greater than 0 and less than 1');
+    }
+    return rate;
+  }
+
   private async requirePostedTransaction(
     manager: EntityManager,
     transactionId: string,
@@ -517,9 +523,7 @@ export class WalletSettlementService {
     transactionId: string,
   ): TripSettlementResult {
     const gross = new Decimal(trip.fare_amount).toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
-    const commissionRate = new Decimal(
-      this.config.getOrThrow<string>('PLATFORM_COMMISSION_RATE'),
-    );
+    const commissionRate = this.commissionRate();
     const commission = gross.mul(commissionRate).toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
     const driverNet = gross.minus(commission).toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
     return this.resultFromAmounts(
