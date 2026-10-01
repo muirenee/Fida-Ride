@@ -8,6 +8,7 @@ import { DriverEntity } from './database/entities/driver.entity';
 import { TripEntity } from './database/entities/trip.entity';
 import { UserEntity } from './database/entities/user.entity';
 import { WhatsAppInboxEntity } from './database/entities/whatsapp-inbox.entity';
+import { FraudModule } from './fraud/fraud.module';
 import { HealthController } from './health.controller';
 import { RedisModule } from './redis/redis.module';
 import { RidesModule } from './rides/rides.module';
@@ -42,6 +43,7 @@ import { WhatsAppModule } from './whatsapp/whatsapp.module';
       }),
     }),
     RedisModule,
+    FraudModule,
     UsersModule,
     AuthModule,
     RidesModule,
