@@ -23,10 +23,11 @@ export class UpsertGeofenceDto {
   @Matches(/^[A-Za-z0-9_-]+$/)
   boundary_id!: string;
 
+  @IsOptional()
   @IsString()
   @MinLength(2)
   @MaxLength(128)
-  name!: string;
+  name?: string;
 
   @IsString()
   @MinLength(16)
