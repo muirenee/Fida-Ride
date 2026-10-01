@@ -7,7 +7,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'crypto';
 import Decimal from 'decimal.js';
-import { DataSource, QueryRunner } from 'typeorm';
+import { DataSource } from 'typeorm';
 import { AuthPrincipal } from '../auth/jwt-auth.guard';
 import { RedisService } from '../redis/redis.service';
 import { AcceptBidDto } from './dto/accept-bid.dto';
@@ -53,7 +53,7 @@ export class BiddingService {
       throw new ConflictException('Trip is not open for fare negotiation');
     }
 
-    const rows = await this.dataSource.query<NegotiationContextRow[]>(
+    const rows = (await this.dataSource.query(
       `
       SELECT
         t.rider_id,
@@ -69,7 +69,7 @@ export class BiddingService {
       LIMIT 1
       `,
       [dto.trip_id, dto.driver_id],
-    );
+    )) as NegotiationContextRow[];
 
     const context = rows[0];
     if (!context) throw new NotFoundException('Trip or driver not found');
@@ -164,7 +164,7 @@ export class BiddingService {
       let acceptedFare: string;
       let riderId: string;
       try {
-        const bidRows = await queryRunner.query<BidRow[]>(
+        const bidRows = (await queryRunner.query(
           `
           SELECT
             b.id AS bid_id,
@@ -180,7 +180,7 @@ export class BiddingService {
           FOR UPDATE OF b, t
           `,
           [dto.trip_id, dto.driver_id],
-        );
+        )) as BidRow[];
 
         const bid = bidRows[0];
         if (!bid) throw new NotFoundException('Active bid not found');
@@ -188,7 +188,7 @@ export class BiddingService {
           throw new ForbiddenException('Trip does not belong to this rider');
         }
 
-        const updated = await queryRunner.query<AcceptedTripRow[]>(
+        const updated = (await queryRunner.query(
           `
           UPDATE core.trips
           SET driver_id = $2,
@@ -203,7 +203,7 @@ export class BiddingService {
           RETURNING id, driver_id, fare_amount::text, status
           `,
           [dto.trip_id, dto.driver_id, bid.proposed_fare, principal.user_id],
-        );
+        )) as AcceptedTripRow[];
 
         const trip = updated[0];
         if (!trip) {
@@ -283,14 +283,14 @@ export class BiddingService {
         [input.tripId, input.driverId],
       );
 
-      const rows = await runner.query<Array<{ id: string }>>(
+      const rows = (await runner.query(
         `
         INSERT INTO core.trip_bids (trip_id, driver_id, proposed_fare, driver_rating, status)
         VALUES ($1, $2, $3::numeric, $4::numeric, 'active')
         RETURNING id
         `,
         [input.tripId, input.driverId, input.proposedFare, input.driverRating],
-      );
+      )) as Array<{ id: string }>;
 
       const id = rows[0]?.id;
       if (!id) throw new Error('Failed to persist bid');
