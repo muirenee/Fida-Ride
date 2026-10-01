@@ -65,7 +65,6 @@ export class AuthService {
   async requestPhoneLogin(phone: string) {
     const user = await this.users.findByPhone(phone);
     if (!user || user.status !== 'active') {
-      // Deliberately avoid revealing whether the account exists.
       return { accepted: true };
     }
 
@@ -126,9 +125,12 @@ export class AuthService {
     const driver = await this.users.findDriverByUserId(user.id);
     const expiresIn = this.config.getOrThrow<number>('JWT_ACCESS_TTL_SECONDS');
 
+    // Driver JWTs use the driver UUID as the subject so the same token can
+    // authenticate the Go telemetry socket. user_id preserves the account UUID.
     const accessToken = await this.jwt.signAsync(
       {
-        sub: user.id,
+        sub: driver?.id ?? user.id,
+        user_id: user.id,
         role: driver ? 'driver' : 'rider',
         driver_id: driver?.id,
         phone: user.phone,
