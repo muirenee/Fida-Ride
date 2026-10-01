@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { AdminModule } from './admin/admin.module';
 import { AttestationModule } from './attestation/attestation.module';
 import { AuthModule } from './auth/auth.module';
 import { BiddingModule } from './bidding/bidding.module';
@@ -50,6 +51,7 @@ import { WhatsAppModule } from './whatsapp/whatsapp.module';
     FinanceModule,
     UsersModule,
     AuthModule,
+    AdminModule,
     RidesModule,
     BiddingModule,
     WhatsAppModule,
