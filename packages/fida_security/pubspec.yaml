@@ -1,0 +1,30 @@
+name: fida_security
+description: Shared Fida-Ride device identity, attestation and telemetry signing.
+version: 0.1.0
+publish_to: none
+resolution: workspace
+
+environment:
+  sdk: ^3.13.0
+  flutter: '>=3.47.0'
+
+dependencies:
+  crypto: ^3.0.7
+  fida_api: ^0.1.0
+  flutter:
+    sdk: flutter
+  flutter_secure_storage: ^11.2.0
+  uuid: ^4.6.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+flutter:
+  plugin:
+    platforms:
+      android:
+        package: com.fidalix.fida_security
+        pluginClass: FidaSecurityPlugin
+      ios:
+        pluginClass: FidaSecurityPlugin
