@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { VehicleType } from '../common/vehicle-type';
 import { RedisService } from '../redis/redis.service';
 import { SurgePricingService } from './surge-pricing.service';
@@ -6,16 +6,18 @@ import { HeatmapPoint } from './surge.types';
 
 @Injectable()
 export class HeatmapService {
+  private readonly logger = new Logger(HeatmapService.name);
+
   constructor(
     private readonly redis: RedisService,
     private readonly surge: SurgePricingService,
   ) {}
 
   async get(vehicleType: VehicleType): Promise<HeatmapPoint[]> {
-    const raw = await this.redis.get(this.surge.heatmapKey(vehicleType));
-    if (!raw) return [];
-
     try {
+      const raw = await this.redis.get(this.surge.heatmapKey(vehicleType));
+      if (!raw) return [];
+
       const parsed = JSON.parse(raw) as unknown;
       if (!Array.isArray(parsed)) return [];
 
@@ -23,7 +25,12 @@ export class HeatmapService {
         if (!isHeatmapPoint(value)) return [];
         return [value];
       });
-    } catch {
+    } catch (error) {
+      this.logger.warn(
+        `Heatmap cache unavailable for ${vehicleType}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
       return [];
     }
   }
