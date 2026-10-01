@@ -1,5 +1,7 @@
-import { IsEnum, IsNumber, IsUUID, Max, Min } from 'class-validator';
+import { IsEnum, IsIn, IsNumber, IsOptional, IsUUID, Max, Min } from 'class-validator';
 import { VehicleType } from '../../common/vehicle-type';
+
+export type RidePaymentMethod = 'cash' | 'card' | 'wallet';
 
 export class RequestRideDto {
   @IsUUID()
@@ -27,4 +29,8 @@ export class RequestRideDto {
 
   @IsEnum(VehicleType)
   vehicle_type!: VehicleType;
+
+  @IsOptional()
+  @IsIn(['cash', 'card', 'wallet'])
+  payment_method?: RidePaymentMethod;
 }
