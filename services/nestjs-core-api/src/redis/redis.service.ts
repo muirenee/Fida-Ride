@@ -54,10 +54,6 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     return this.client.incr(key);
   }
 
-  expire(key: string, ttlSeconds: number): Promise<boolean> {
-    return this.client.expire(key, ttlSeconds);
-  }
-
   mGet(keys: string[]): Promise<Array<string | null>> {
     if (keys.length === 0) return Promise.resolve([]);
     return this.client.mGet(keys);
@@ -74,20 +70,13 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     radiusKm: number,
     limit: number,
   ): Promise<string[]> {
-    const reply = await this.client.sendCommand([
-      'GEOSEARCH',
+    const reply = await this.client.geoSearch(
       key,
-      'FROMLONLAT',
-      String(longitude),
-      String(latitude),
-      'BYRADIUS',
-      String(radiusKm),
-      'KM',
-      'ASC',
-      'COUNT',
-      String(limit),
-    ]);
+      { longitude, latitude },
+      { radius: radiusKm, unit: 'km' },
+      { SORT: 'ASC', COUNT: limit },
+    );
 
-    return (reply ?? []) as string[];
+    return reply.map((member) => String(member));
   }
 }
