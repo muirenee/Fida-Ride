@@ -13,13 +13,13 @@ import (
 )
 
 const (
-	telemetryUpdatesChannel      = "driver:updates:active"
-	biddingEventsChannel         = "bidding:events"
-	availableDriverCountKey      = "admin:available-driver-count"
-	maxAdminControlFrameBytes    = 2 * 1024
-	availableDriverStaleAfter    = 30 * time.Second
-	availableCountPublishEvery   = 1 * time.Second
-	availableStateCleanupEvery   = 5 * time.Second
+	telemetryUpdatesChannel    = "driver:updates:active"
+	biddingEventsChannel       = "bidding:events"
+	availableDriverCountKey    = "admin:available-driver-count"
+	maxAdminControlFrameBytes  = 2 * 1024
+	availableDriverStaleAfter  = 30 * time.Second
+	availableCountPublishEvery = 1 * time.Second
+	availableStateCleanupEvery = 5 * time.Second
 )
 
 type TelemetryPacket struct {
