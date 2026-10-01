@@ -27,13 +27,13 @@ type telemetryFraudSettings struct {
 }
 
 type TelemetryVelocityVerdict struct {
-	ObservedAt        time.Time
+	ObservedAt         time.Time
 	UpdateTrustedState bool
-	Flagged           bool
-	SpeedKPH          float64
-	DistanceMeters    float64
-	Elapsed           time.Duration
-	Previous          *TrustedTelemetryPoint
+	Flagged            bool
+	SpeedKPH           float64
+	DistanceMeters     float64
+	Elapsed            time.Duration
+	Previous           *TrustedTelemetryPoint
 }
 
 type TrustedTelemetryPoint struct {
@@ -140,16 +140,12 @@ func (s *Server) validateTelemetryVelocity(packet TelemetryPacket) (TelemetryVel
 	verdict.Elapsed = elapsed
 
 	if elapsed <= 0 || elapsed < settings.MinWindow {
-		// Burst packets are accepted for realtime display, but do not move the
-		// trusted fraud baseline until enough server-observed time has elapsed.
 		verdict.UpdateTrustedState = false
 		s.logFraudBudget(started, settings.Budget, packet.DriverID)
 		return verdict, nil
 	}
 
 	if elapsed > settings.MaxWindow {
-		// Baseline is stale; accept this packet as a new trusted origin rather
-		// than deriving speed across a long offline period.
 		s.logFraudBudget(started, settings.Budget, packet.DriverID)
 		return verdict, nil
 	}
