@@ -19,7 +19,7 @@ interface GeometryInspectionRow {
   point_count: number;
 }
 
-interface GeofenceRow {
+export interface GeofenceRow {
   id: string;
   code: string;
   name: string;
