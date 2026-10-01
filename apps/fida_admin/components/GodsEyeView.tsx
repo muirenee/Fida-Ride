@@ -44,7 +44,6 @@ type GodsEyeViewProps = {
   streamUrl?: string;
   mapStyleUrl?: string;
   apiBasePath?: string;
-  adminToken?: string;
 };
 
 const STREAM_PROTOCOL = 'fida-admin.v1';
@@ -92,14 +91,6 @@ function isDriverUpdate(value: unknown): value is DriverUpdate {
   );
 }
 
-function base64Url(value: string): string {
-  return window
-    .btoa(value)
-    .replaceAll('+', '-')
-    .replaceAll('/', '_')
-    .replace(/=+$/u, '');
-}
-
 function formatMoney(amount: string, currency: string): string {
   const parsed = Number(amount);
   if (!Number.isFinite(parsed)) return `${currency} 0`;
@@ -118,8 +109,7 @@ export function GodsEyeView({
   streamUrl = process.env.NEXT_PUBLIC_ADMIN_STREAM_URL ?? 'ws://127.0.0.1:8090/admin/stream',
   mapStyleUrl =
     process.env.NEXT_PUBLIC_MAP_STYLE_URL ?? 'https://demotiles.maplibre.org/style.json',
-  apiBasePath = '/core',
-  adminToken,
+  apiBasePath = '',
 }: GodsEyeViewProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
@@ -225,9 +215,7 @@ export function GodsEyeView({
       if (stopped) return;
       setStreamState(attempt === 0 ? 'connecting' : 'reconnecting');
 
-      const protocols = [STREAM_PROTOCOL];
-      if (adminToken) protocols.push(`fida.jwt.${base64Url(adminToken)}`);
-      const socket = new WebSocket(streamUrl, protocols);
+      const socket = new WebSocket(streamUrl, [STREAM_PROTOCOL]);
       socketRef.current = socket;
 
       socket.onopen = () => {
@@ -292,7 +280,7 @@ export function GodsEyeView({
         socket.close(1000, 'dashboard unmounted');
       }
     };
-  }, [adminToken, sendViewport, streamUrl]);
+  }, [sendViewport, streamUrl]);
 
   useEffect(() => {
     let stopped = false;
