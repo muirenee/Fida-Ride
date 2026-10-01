@@ -11,6 +11,7 @@ on:
       - 'services/go-admin-stream-service/**'
       - 'services/nestjs-core-api/src/admin/**'
       - 'database/migrations/schema-v10-admin-operations.sql'
+      - 'database/migrations/schema-v11-admin-auth.sql'
       - '.github/workflows/admin-ci.yml'
   pull_request:
     branches:
@@ -22,6 +23,7 @@ on:
       - 'services/go-admin-stream-service/**'
       - 'services/nestjs-core-api/src/admin/**'
       - 'database/migrations/schema-v10-admin-operations.sql'
+      - 'database/migrations/schema-v11-admin-auth.sql'
       - '.github/workflows/admin-ci.yml'
   workflow_dispatch:
 
