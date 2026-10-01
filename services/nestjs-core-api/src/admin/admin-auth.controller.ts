@@ -61,12 +61,13 @@ export class AdminAuthController {
     @Req() request: AdminHttpRequest,
     @Res({ passthrough: true }) response: HeaderResponse,
   ): Promise<{ authenticated: false }> {
-    const sessionId = request.admin?.sid;
-    if (sessionId) await this.sessions.revoke(sessionId);
-
     response.setHeader('Set-Cookie', this.clearCookie());
     response.setHeader('Cache-Control', 'no-store, private');
     response.setHeader('Pragma', 'no-cache');
+
+    const sessionId = request.admin?.sid;
+    if (sessionId) await this.sessions.revoke(sessionId);
+
     return { authenticated: false };
   }
 
