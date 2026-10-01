@@ -1,6 +1,7 @@
 import {
   CallHandler,
   ExecutionContext,
+  ForbiddenException,
   Injectable,
   NestInterceptor,
 } from '@nestjs/common';
@@ -30,7 +31,16 @@ export class FraudDetectionInterceptor implements NestInterceptor {
     if (!principal) return next.handle();
 
     await this.fraud.assertAccountAllowed(principal);
-    await this.fraud.assessApiRequest(principal, this.extractMetadata(request));
+    const assessment = await this.fraud.assessApiRequest(
+      principal,
+      this.extractMetadata(request),
+    );
+
+    if (assessment && assessment.action !== 'observe') {
+      throw new ForbiddenException(
+        `Request blocked by automated security policy: ${assessment.action}`,
+      );
+    }
 
     return next.handle();
   }
