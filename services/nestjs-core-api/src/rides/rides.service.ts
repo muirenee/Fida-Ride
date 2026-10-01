@@ -60,6 +60,7 @@ export class RidesService {
 
     let candidateDriverIds: string[] = [];
     let dispatchDeferred = false;
+    const biddingTtlSeconds = this.config.getOrThrow<number>('BIDDING_TTL_SECONDS');
 
     try {
       candidateDriverIds = await this.dispatch.nearbyAvailableDrivers({
@@ -67,6 +68,8 @@ export class RidesService {
         pickupLng: dto.pickup_lng,
         vehicleType: dto.vehicle_type,
       });
+
+      await this.redis.openBidding(trip.id, candidateDriverIds, biddingTtlSeconds);
 
       await this.redis.publish(
         'ride:dispatch:requested',
@@ -76,15 +79,16 @@ export class RidesService {
           vehicle_type: dto.vehicle_type,
           pickup: { lat: dto.pickup_lat, lng: dto.pickup_lng },
           candidate_driver_ids: candidateDriverIds,
+          bidding_expires_in_seconds: biddingTtlSeconds,
           requested_at: new Date().toISOString(),
         }),
       );
     } catch (error) {
       // PostgreSQL owns the ride state. Cache/broker failure must not make a client
-      // retry an already-created ride; a future dispatch worker can recover it.
+      // retry an already-created ride; a recovery worker can resume matching later.
       dispatchDeferred = true;
       this.logger.error(
-        `Initial dispatch failed for trip ${trip.id}`,
+        `Initial dispatch/bidding setup failed for trip ${trip.id}`,
         error instanceof Error ? error.stack : String(error),
       );
     }
@@ -97,6 +101,10 @@ export class RidesService {
       estimated_fare: trip.fareAmount,
       currency: trip.currency,
       surge_multiplier: trip.surgeMultiplier,
+      bidding: {
+        state: dispatchDeferred ? 'deferred' : 'broadcasted',
+        expires_in_seconds: biddingTtlSeconds,
+      },
       dispatch: {
         radius_km: Number(this.config.getOrThrow<string>('DISPATCH_RADIUS_KM')),
         candidate_count: candidateDriverIds.length,
