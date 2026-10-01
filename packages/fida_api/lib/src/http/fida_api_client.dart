@@ -3,18 +3,15 @@ import 'package:dio/dio.dart';
 typedef AccessTokenProvider = Future<String?> Function();
 
 final class FidaApiException implements Exception {
-  const FidaApiException({
-    required this.message,
-    this.statusCode,
-    this.cause,
-  });
+  const FidaApiException({required this.message, this.statusCode, this.cause});
 
   final String message;
   final int? statusCode;
   final Object? cause;
 
   @override
-  String toString() => 'FidaApiException(statusCode: $statusCode, message: $message)';
+  String toString() =>
+      'FidaApiException(statusCode: $statusCode, message: $message)';
 }
 
 final class FidaApiClient {
@@ -24,31 +21,32 @@ final class FidaApiClient {
     Duration connectTimeout = const Duration(seconds: 10),
     Duration receiveTimeout = const Duration(seconds: 20),
   }) : _dio = Dio(
-          BaseOptions(
-            baseUrl: baseUrl,
-            connectTimeout: connectTimeout,
-            receiveTimeout: receiveTimeout,
-            sendTimeout: connectTimeout,
-            responseType: ResponseType.json,
-            headers: const <String, Object>{
-              'accept': 'application/json',
-              'content-type': 'application/json',
-            },
-          ),
-        ) {
+         BaseOptions(
+           baseUrl: baseUrl,
+           connectTimeout: connectTimeout,
+           receiveTimeout: receiveTimeout,
+           sendTimeout: connectTimeout,
+           responseType: ResponseType.json,
+           headers: const <String, Object>{
+             'accept': 'application/json',
+             'content-type': 'application/json',
+           },
+         ),
+       ) {
     if (accessTokenProvider != null) {
       _dio.interceptors.add(
         InterceptorsWrapper(
-          onRequest: (
-            RequestOptions options,
-            RequestInterceptorHandler handler,
-          ) async {
-            final String? token = await accessTokenProvider();
-            if (token != null && token.isNotEmpty) {
-              options.headers['authorization'] = 'Bearer $token';
-            }
-            handler.next(options);
-          },
+          onRequest:
+              (
+                RequestOptions options,
+                RequestInterceptorHandler handler,
+              ) async {
+                final String? token = await accessTokenProvider();
+                if (token != null && token.isNotEmpty) {
+                  options.headers['authorization'] = 'Bearer $token';
+                }
+                handler.next(options);
+              },
         ),
       );
     }
@@ -94,10 +92,8 @@ final class FidaApiClient {
     }
 
     return value.map<String, Object?>(
-      (Object? key, Object? item) => MapEntry<String, Object?>(
-        key.toString(),
-        item,
-      ),
+      (Object? key, Object? item) =>
+          MapEntry<String, Object?>(key.toString(), item),
     );
   }
 
