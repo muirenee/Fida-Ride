@@ -1,0 +1,78 @@
+name: Backend CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'services/nestjs-core-api/**'
+      - 'services/go-telemetry-service/**'
+      - 'database/migrations/**'
+      - '.github/workflows/backend-ci.yml'
+  pull_request:
+    paths:
+      - 'services/nestjs-core-api/**'
+      - 'services/go-telemetry-service/**'
+      - 'database/migrations/**'
+      - '.github/workflows/backend-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  nestjs:
+    name: NestJS typecheck and build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/nestjs-core-api
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: services/nestjs-core-api/package.json
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
+  go:
+    name: Go format, vet and test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/go-telemetry-service
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22.x'
+          cache-dependency-path: services/go-telemetry-service/go.mod
+
+      - name: Verify formatting
+        shell: bash
+        run: |
+          diff="$(gofmt -d .)"
+          if [ -n "$diff" ]; then
+            printf '%s\n' "$diff"
+            exit 1
+          fi
+
+      - name: Test
+        run: go test ./...
+
+      - name: Vet
+        run: go vet ./...
