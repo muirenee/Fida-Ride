@@ -57,7 +57,9 @@ export class AdminAuthService implements OnModuleInit {
   }
 
   assertSecureTransport(headers: Record<string, string | string[] | undefined>): void {
-    if (!this.config.getOrThrow<boolean>('ADMIN_REQUIRE_HTTPS')) return;
+    const nodeEnv = this.config.get<string>('NODE_ENV', 'development');
+    const requireHttps = this.config.get<boolean>('ADMIN_REQUIRE_HTTPS', nodeEnv === 'production');
+    if (!requireHttps) return;
 
     const raw = headers['x-forwarded-proto'];
     const value = Array.isArray(raw) ? raw[0] : raw;
@@ -105,12 +107,11 @@ export class AdminAuthService implements OnModuleInit {
     }
 
     const now = new Date();
-    const accountUsable =
-      account?.status === 'active' &&
-      (!account.locked_until || account.locked_until.getTime() <= now.getTime());
+    const lockExpired = !account?.locked_until || account.locked_until.getTime() <= now.getTime();
+    const accountUsable = account?.status === 'active' && lockExpired;
 
     if (!account || !passwordMatches || !accountUsable) {
-      if (account?.status === 'active' && !account.locked_until) {
+      if (account?.status === 'active' && lockExpired) {
         await this.registerFailedLogin(account.id);
       }
       await this.writeAudit('admin_login_failed', 'medium', context, account?.id);
@@ -138,7 +139,7 @@ export class AdminAuthService implements OnModuleInit {
       jti: randomUUID(),
     };
 
-    const ttlSeconds = this.config.getOrThrow<number>('ADMIN_JWT_ACCESS_TTL_SECONDS');
+    const ttlSeconds = this.config.get<number>('ADMIN_JWT_ACCESS_TTL_SECONDS', 900);
     const accessToken = await this.jwt.signAsync(
       {
         role: principal.role,
@@ -150,8 +151,8 @@ export class AdminAuthService implements OnModuleInit {
         algorithm: 'HS256',
         subject: principal.sub,
         jwtid: principal.jti,
-        issuer: this.config.getOrThrow<string>('ADMIN_JWT_ISSUER'),
-        audience: this.config.getOrThrow<string>('ADMIN_JWT_AUDIENCE'),
+        issuer: this.config.get<string>('ADMIN_JWT_ISSUER', 'fida-ride-admin'),
+        audience: this.config.get<string>('ADMIN_JWT_AUDIENCE', 'fida-admin'),
         expiresIn: ttlSeconds,
       },
     );
@@ -163,9 +164,9 @@ export class AdminAuthService implements OnModuleInit {
   }
 
   private async enforceRateLimit(username: string, ip: string): Promise<void> {
-    const windowSeconds = this.config.getOrThrow<number>('ADMIN_LOGIN_RATE_WINDOW_SECONDS');
-    const perAccountMax = this.config.getOrThrow<number>('ADMIN_LOGIN_RATE_ACCOUNT_MAX');
-    const perIpMax = this.config.getOrThrow<number>('ADMIN_LOGIN_RATE_IP_MAX');
+    const windowSeconds = this.config.get<number>('ADMIN_LOGIN_RATE_WINDOW_SECONDS', 900);
+    const perAccountMax = this.config.get<number>('ADMIN_LOGIN_RATE_ACCOUNT_MAX', 10);
+    const perIpMax = this.config.get<number>('ADMIN_LOGIN_RATE_IP_MAX', 30);
 
     const [accountScore, ipScore] = await Promise.all([
       this.redis.addScoreWithTtl(
@@ -186,8 +187,8 @@ export class AdminAuthService implements OnModuleInit {
   }
 
   private async registerFailedLogin(accountId: string): Promise<void> {
-    const maxFailures = this.config.getOrThrow<number>('ADMIN_LOGIN_MAX_FAILURES');
-    const lockSeconds = this.config.getOrThrow<number>('ADMIN_LOGIN_LOCK_SECONDS');
+    const maxFailures = this.config.get<number>('ADMIN_LOGIN_MAX_FAILURES', 5);
+    const lockSeconds = this.config.get<number>('ADMIN_LOGIN_LOCK_SECONDS', 900);
 
     await this.db.query(
       `
@@ -216,12 +217,11 @@ export class AdminAuthService implements OnModuleInit {
   }
 
   private fingerprint(value: string): string {
-    return createHmac(
-      'sha256',
-      this.config.getOrThrow<string>('ADMIN_LOGIN_RATE_HMAC_SECRET'),
-    )
-      .update(value)
-      .digest('hex');
+    const secret = this.config.get<string>(
+      'ADMIN_LOGIN_RATE_HMAC_SECRET',
+      this.config.getOrThrow<string>('ADMIN_JWT_HS256_SECRET'),
+    );
+    return createHmac('sha256', secret).update(`fida-admin-rate:${value}`).digest('hex');
   }
 
   private async writeAudit(
