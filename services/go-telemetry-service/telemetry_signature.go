@@ -19,6 +19,7 @@ const (
 	telemetryActiveSessionPrefix = "telemetry:active-session:"
 	telemetrySessionPrefix       = "telemetry:session:"
 	telemetrySequencePrefix      = "telemetry:sequence:"
+	driverFinancialBlockPrefix   = "finance:driver-online-block:"
 )
 
 var advanceTelemetrySequenceScript = redis.NewScript(`
@@ -80,13 +81,25 @@ func (s *Server) verifyTelemetrySignature(packet TelemetryPacket) error {
 
 	activeKey := telemetryActiveSessionPrefix + packet.DriverID
 	sessionKey := telemetrySessionPrefix + packet.DriverID + ":" + packet.SessionID
+	financialBlockKey := driverFinancialBlockPrefix + packet.DriverID
 
+	// Financial eligibility is checked in the same Redis pipeline as session
+	// validation, so the debt guard does not add another network round trip.
 	pipe := s.redis.Pipeline()
 	activeCmd := pipe.Get(ctx, activeKey)
 	secretCmd := pipe.Get(ctx, sessionKey)
+	financialBlockCmd := pipe.Get(ctx, financialBlockKey)
 	_, execErr := pipe.Exec(ctx)
 	if execErr != nil && !errors.Is(execErr, redis.Nil) {
 		return fmt.Errorf("load telemetry signing session: %w", execErr)
+	}
+
+	if blockValue, blockErr := financialBlockCmd.Result(); blockErr == nil {
+		if strings.TrimSpace(blockValue) != "" {
+			return errors.New("driver telemetry blocked by financial credit policy")
+		}
+	} else if !errors.Is(blockErr, redis.Nil) {
+		return fmt.Errorf("load driver financial eligibility: %w", blockErr)
 	}
 
 	activeSession, err := activeCmd.Result()
