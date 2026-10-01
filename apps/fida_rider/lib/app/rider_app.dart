@@ -16,8 +16,8 @@ final class RiderApp extends StatelessWidget {
         useMaterial3: true,
       ),
       home: BlocProvider<LocationBloc>(
-        create: (BuildContext context) => LocationBloc()
-          ..add(const StartTracking()),
+        create: (BuildContext context) =>
+            LocationBloc()..add(const StartTracking()),
         child: const MapScreen(
           initialLatitude: -1.9441,
           initialLongitude: 30.0619,
