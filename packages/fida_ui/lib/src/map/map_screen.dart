@@ -78,9 +78,7 @@ final class _MapScreenState extends State<MapScreen>
 
     if (widget.followTrackedLocation && _mapController.isCompleted) {
       final GoogleMapController controller = await _mapController.future;
-      await controller.animateCamera(
-        CameraUpdate.newLatLng(target),
-      );
+      await controller.animateCamera(CameraUpdate.newLatLng(target));
     }
   }
 
