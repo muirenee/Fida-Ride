@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { RedisService } from '../redis/redis.service';
 import { AdminJwtPrincipal, AdminSessionRecord } from './admin-auth.types';
+import { adminInteger } from './admin-config';
 
 const ADMIN_SESSION_REVOKED_CHANNEL = 'admin:session:revoked';
 
@@ -13,7 +14,13 @@ export class AdminSessionService {
   ) {}
 
   async create(principal: AdminJwtPrincipal): Promise<void> {
-    const ttlSeconds = this.config.get<number>('ADMIN_JWT_ACCESS_TTL_SECONDS', 900);
+    const ttlSeconds = adminInteger(
+      this.config,
+      'ADMIN_JWT_ACCESS_TTL_SECONDS',
+      900,
+      60,
+      86_400,
+    );
     const record: AdminSessionRecord = {
       sub: principal.sub,
       role: principal.role,
