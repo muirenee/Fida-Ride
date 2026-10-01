@@ -12,11 +12,11 @@ import (
 )
 
 const (
-	adminStreamProtocol       = "fida-admin.v1"
-	adminJWTProtocolPrefix    = "fida.jwt."
-	adminJWTCookieName        = "fida_admin_access"
-	adminDashboardPermission  = "admin:dashboard:read"
-	adminWildcardPermission   = "admin:*"
+	adminStreamProtocol      = "fida-admin.v1"
+	adminJWTProtocolPrefix   = "fida.jwt."
+	adminJWTCookieName       = "fida_admin_access"
+	adminDashboardPermission = "admin:dashboard:read"
+	adminWildcardPermission  = "admin:*"
 )
 
 type jwtHeader struct {
