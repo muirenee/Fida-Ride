@@ -39,7 +39,7 @@ const (
 )
 
 var (
-	driverIDPattern          = regexp.MustCompile(`^[A-Za-z0-9._:-]+$`)
+	driverIDPattern           = regexp.MustCompile(`^[A-Za-z0-9._:-]+$`)
 	telemetrySignaturePattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 )
 
