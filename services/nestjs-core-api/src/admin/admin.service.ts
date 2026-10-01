@@ -63,34 +63,35 @@ export class AdminService {
                   AS day_end
             )
             SELECT
-              COUNT(*) FILTER (
-                WHERE t.status IN ('accepted', 'picked_up')
-              )::int AS active_trips,
               (
                 SELECT COUNT(*)::int
-                FROM core.security_audit_logs s, bounds b
+                FROM core.trips t
+                WHERE t.status IN ('accepted', 'picked_up')
+              ) AS active_trips,
+              (
+                SELECT COUNT(*)::int
+                FROM core.security_audit_logs s
+                CROSS JOIN bounds b
                 WHERE s.action IN ('flagged', 'suspended')
                   AND s.occurred_at >= b.day_start
                   AND s.occurred_at < b.day_end
               ) AS flagged_fraud_alerts,
-              COALESCE(
-                SUM(t.fare_amount) FILTER (
-                  WHERE t.status = 'completed'
-                    AND t.completed_at >= b.day_start
-                    AND t.completed_at < b.day_end
-                ),
-                0::numeric
-              )::text AS gross_marketplace_revenue,
-              COALESCE(
-                MAX(t.currency) FILTER (
-                  WHERE t.status = 'completed'
-                    AND t.completed_at >= b.day_start
-                    AND t.completed_at < b.day_end
-                ),
-                'RWF'
+              (
+                SELECT COALESCE(SUM(t.fare_amount), 0::numeric)::text
+                FROM core.trips t
+                CROSS JOIN bounds b
+                WHERE t.status = 'completed'
+                  AND t.completed_at >= b.day_start
+                  AND t.completed_at < b.day_end
+              ) AS gross_marketplace_revenue,
+              (
+                SELECT COALESCE(MAX(t.currency), 'RWF')
+                FROM core.trips t
+                CROSS JOIN bounds b
+                WHERE t.status = 'completed'
+                  AND t.completed_at >= b.day_start
+                  AND t.completed_at < b.day_end
               ) AS currency
-            FROM core.trips t
-            CROSS JOIN bounds b
           `,
           [reportingTimeZone],
         )) as MetricsRow[];
@@ -122,6 +123,7 @@ export class AdminService {
     const vehicleTypes = dto.vehicle_types ?? Object.values(VehicleType);
     const priority = dto.priority ?? 0;
     const active = dto.active ?? true;
+    const name = dto.name?.trim() || dto.boundary_id;
     const configuredMaxPoints = Number(
       this.config.get<string | number>('ADMIN_GEOFENCE_MAX_POINTS', 10_000),
     );
@@ -191,7 +193,7 @@ export class AdminService {
               vehicle_types,
               updated_at
           `,
-          [dto.boundary_id, dto.name, dto.geojson, vehicleTypes, priority, active],
+          [dto.boundary_id, name, dto.geojson, vehicleTypes, priority, active],
         )) as GeofenceRow[];
 
         const result = rows[0];
