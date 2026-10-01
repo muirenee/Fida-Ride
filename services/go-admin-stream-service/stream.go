@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"strings"
 	"sync"
@@ -14,9 +13,13 @@ import (
 )
 
 const (
-	telemetryUpdatesChannel   = "driver:updates:active"
-	activeTripKeyPrefix       = "driver:active-trip:"
-	maxAdminControlFrameBytes = 2 * 1024
+	telemetryUpdatesChannel      = "driver:updates:active"
+	biddingEventsChannel         = "bidding:events"
+	availableDriverCountKey      = "admin:available-driver-count"
+	maxAdminControlFrameBytes    = 2 * 1024
+	availableDriverStaleAfter    = 30 * time.Second
+	availableCountPublishEvery   = 1 * time.Second
+	availableStateCleanupEvery   = 5 * time.Second
 )
 
 type TelemetryPacket struct {
@@ -24,6 +27,12 @@ type TelemetryPacket struct {
 	Latitude  float64 `json:"latitude"`
 	Longitude float64 `json:"longitude"`
 	Status    string  `json:"status"`
+}
+
+type BiddingEvent struct {
+	Event    string `json:"event"`
+	TripID   string `json:"trip_id"`
+	DriverID string `json:"driver_id"`
 }
 
 type AdminDriverUpdate struct {
@@ -55,18 +64,27 @@ type adminStreamClient struct {
 	hasViewport bool
 }
 
+type driverAvailabilityState struct {
+	available bool
+	lastSeen  time.Time
+}
+
 type AdminStreamHub struct {
 	mu      sync.RWMutex
 	clients map[*adminStreamClient]struct{}
 
 	pendingMu sync.Mutex
 	pending   map[string]AdminDriverUpdate
+
+	tripMu      sync.RWMutex
+	activeTrips map[string]string
 }
 
 func NewAdminStreamHub() *AdminStreamHub {
 	return &AdminStreamHub{
-		clients: make(map[*adminStreamClient]struct{}),
-		pending: make(map[string]AdminDriverUpdate),
+		clients:     make(map[*adminStreamClient]struct{}),
+		pending:     make(map[string]AdminDriverUpdate),
+		activeTrips: make(map[string]string),
 	}
 }
 
@@ -80,6 +98,32 @@ func (h *AdminStreamHub) unregister(client *adminStreamClient) {
 	h.mu.Lock()
 	delete(h.clients, client)
 	h.mu.Unlock()
+}
+
+func (h *AdminStreamHub) setActiveTrip(driverID, tripID string) {
+	if driverID == "" || tripID == "" {
+		return
+	}
+	h.tripMu.Lock()
+	h.activeTrips[driverID] = tripID
+	h.tripMu.Unlock()
+}
+
+func (h *AdminStreamHub) clearActiveTrip(driverID string) {
+	h.tripMu.Lock()
+	delete(h.activeTrips, driverID)
+	h.tripMu.Unlock()
+}
+
+func (h *AdminStreamHub) activeTrip(driverID string) *string {
+	h.tripMu.RLock()
+	tripID := h.activeTrips[driverID]
+	h.tripMu.RUnlock()
+	if tripID == "" {
+		return nil
+	}
+	value := tripID
+	return &value
 }
 
 func (h *AdminStreamHub) stage(update AdminDriverUpdate) {
@@ -154,8 +198,7 @@ func (client *adminStreamClient) enqueue(payload []byte) {
 	default:
 	}
 
-	// A dashboard that cannot keep up should see the newest state, not replay an
-	// ever-growing backlog of stale coordinates.
+	// A slow dashboard receives the newest frame instead of accumulating stale GPS frames.
 	select {
 	case <-client.send:
 	default:
@@ -253,7 +296,7 @@ func validAdminViewport(viewport adminViewport) bool {
 }
 
 func (s *Server) runTelemetrySubscriber(ctx context.Context) {
-	pubsub := s.redis.Subscribe(ctx, telemetryUpdatesChannel)
+	pubsub := s.redis.Subscribe(ctx, telemetryUpdatesChannel, biddingEventsChannel)
 	defer func() { _ = pubsub.Close() }()
 
 	if _, err := pubsub.Receive(ctx); err != nil {
@@ -263,29 +306,85 @@ func (s *Server) runTelemetrySubscriber(ctx context.Context) {
 		return
 	}
 
+	availability := make(map[string]driverAvailabilityState)
+	availableCount := 0
+	publishTicker := time.NewTicker(availableCountPublishEvery)
+	cleanupTicker := time.NewTicker(availableStateCleanupEvery)
+	defer publishTicker.Stop()
+	defer cleanupTicker.Stop()
+
 	channel := pubsub.Channel()
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-publishTicker.C:
+			publishCtx, cancel := context.WithTimeout(ctx, 250*time.Millisecond)
+			_ = s.redis.Set(publishCtx, availableDriverCountKey, availableCount, 2*availableCountPublishEvery).Err()
+			cancel()
+		case now := <-cleanupTicker.C:
+			for driverID, state := range availability {
+				if now.Sub(state.lastSeen) <= availableDriverStaleAfter {
+					continue
+				}
+				if state.available {
+					availableCount--
+				}
+				delete(availability, driverID)
+				s.hub.clearActiveTrip(driverID)
+			}
 		case message, ok := <-channel:
 			if !ok {
 				return
 			}
-			var packet TelemetryPacket
-			if err := json.Unmarshal([]byte(message.Payload), &packet); err != nil {
-				continue
+
+			switch message.Channel {
+			case biddingEventsChannel:
+				var event BiddingEvent
+				if err := json.Unmarshal([]byte(message.Payload), &event); err != nil {
+					continue
+				}
+				if event.Event == "bid_accepted" || event.Event == "trip_locked" {
+					s.hub.setActiveTrip(event.DriverID, event.TripID)
+				}
+			case telemetryUpdatesChannel:
+				var packet TelemetryPacket
+				if err := json.Unmarshal([]byte(message.Payload), &packet); err != nil {
+					continue
+				}
+
+				status := "busy"
+				isAvailable := packet.Status == "available" || packet.Status == "online"
+				if isAvailable {
+					status = "online"
+					s.hub.clearActiveTrip(packet.DriverID)
+				}
+
+				previous, existed := availability[packet.DriverID]
+				if !existed {
+					if isAvailable {
+						availableCount++
+					}
+				} else if previous.available != isAvailable {
+					if isAvailable {
+						availableCount++
+					} else {
+						availableCount--
+					}
+				}
+				availability[packet.DriverID] = driverAvailabilityState{
+					available: isAvailable,
+					lastSeen:  time.Now(),
+				}
+
+				s.hub.stage(AdminDriverUpdate{
+					ID:     packet.DriverID,
+					Lat:    packet.Latitude,
+					Lng:    packet.Longitude,
+					Status: status,
+					TripID: s.hub.activeTrip(packet.DriverID),
+				})
 			}
-			status := "busy"
-			if packet.Status == "available" || packet.Status == "online" {
-				status = "online"
-			}
-			s.hub.stage(AdminDriverUpdate{
-				ID: packet.DriverID,
-				Lat: packet.Latitude,
-				Lng: packet.Longitude,
-				Status: status,
-			})
 		}
 	}
 }
@@ -300,42 +399,9 @@ func (s *Server) runFlusher(ctx context.Context) {
 			return
 		case <-ticker.C:
 			updates := s.hub.drain(s.cfg.AdminStreamMaxBatch)
-			if len(updates) == 0 {
-				continue
+			if len(updates) != 0 {
+				s.broadcastUpdates(updates)
 			}
-			s.enrichTripIDs(ctx, updates)
-			s.broadcastUpdates(updates)
-		}
-	}
-}
-
-func (s *Server) enrichTripIDs(parent context.Context, updates []AdminDriverUpdate) {
-	keys := make([]string, 0, len(updates))
-	indexes := make([]int, 0, len(updates))
-	for index, update := range updates {
-		if update.Status != "busy" {
-			continue
-		}
-		keys = append(keys, activeTripKeyPrefix+update.ID)
-		indexes = append(indexes, index)
-	}
-	if len(keys) == 0 {
-		return
-	}
-
-	ctx, cancel := context.WithTimeout(parent, 100*time.Millisecond)
-	defer cancel()
-	values, err := s.redis.MGet(ctx, keys...).Result()
-	if err != nil {
-		return
-	}
-	for position, value := range values {
-		if value == nil || position >= len(indexes) {
-			continue
-		}
-		tripID := strings.TrimSpace(fmt.Sprint(value))
-		if tripID != "" {
-			updates[indexes[position]].TripID = &tripID
 		}
 	}
 }
