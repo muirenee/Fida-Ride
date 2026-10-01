@@ -99,7 +99,12 @@ export class AdminJwtGuard implements CanActivate {
       const [name, ...valueParts] = part.trim().split('=');
       if (name !== ADMIN_JWT_COOKIE_NAME) continue;
       const value = valueParts.join('=').trim();
-      return value ? decodeURIComponent(value) : null;
+      if (!value) return null;
+      try {
+        return decodeURIComponent(value);
+      } catch {
+        return null;
+      }
     }
 
     return null;
