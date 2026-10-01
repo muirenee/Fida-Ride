@@ -34,8 +34,7 @@ export class WalletSettlementWorker implements OnModuleInit, OnModuleDestroy {
 
   private schedule(delayMs?: number): void {
     if (this.stopped) return;
-    const delay =
-      delayMs ?? this.config.getOrThrow<number>('WALLET_SETTLEMENT_POLL_MS');
+    const delay = delayMs ?? this.config.get<number>('WALLET_SETTLEMENT_POLL_MS', 500);
     this.timer = setTimeout(() => {
       void this.tick();
     }, delay);
@@ -50,7 +49,7 @@ export class WalletSettlementWorker implements OnModuleInit, OnModuleDestroy {
 
     this.running = true;
     try {
-      const batchSize = this.config.getOrThrow<number>('WALLET_SETTLEMENT_BATCH_SIZE');
+      const batchSize = this.config.get<number>('WALLET_SETTLEMENT_BATCH_SIZE', 10);
       for (let index = 0; index < batchSize; index += 1) {
         const claimed = await this.claimNext();
         if (!claimed) break;
@@ -68,10 +67,8 @@ export class WalletSettlementWorker implements OnModuleInit, OnModuleDestroy {
   }
 
   private async claimNext(): Promise<ClaimedSettlement | null> {
-    const leaseSeconds = this.config.getOrThrow<number>(
-      'WALLET_SETTLEMENT_LEASE_SECONDS',
-    );
-    const maxAttempts = this.config.getOrThrow<number>('WALLET_SETTLEMENT_MAX_ATTEMPTS');
+    const leaseSeconds = this.config.get<number>('WALLET_SETTLEMENT_LEASE_SECONDS', 120);
+    const maxAttempts = this.config.get<number>('WALLET_SETTLEMENT_MAX_ATTEMPTS', 20);
 
     return this.db.transaction('READ COMMITTED', async (manager) => {
       const rows = (await manager.query(
@@ -129,7 +126,7 @@ export class WalletSettlementWorker implements OnModuleInit, OnModuleDestroy {
         [claimed.id],
       );
     } catch (error) {
-      const maxAttempts = this.config.getOrThrow<number>('WALLET_SETTLEMENT_MAX_ATTEMPTS');
+      const maxAttempts = this.config.get<number>('WALLET_SETTLEMENT_MAX_ATTEMPTS', 20);
       const exhausted = claimed.attempts >= maxAttempts;
       const backoffSeconds = Math.min(300, Math.max(5, 2 ** Math.min(claimed.attempts, 8)));
       const message =
