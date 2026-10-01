@@ -63,6 +63,10 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     return this.client.mGet(keys);
   }
 
+  publish(channel: string, payload: string): Promise<number> {
+    return this.client.publish(channel, payload);
+  }
+
   async geoSearch(
     key: string,
     longitude: number,
