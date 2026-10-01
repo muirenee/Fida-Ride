@@ -1,4 +1,12 @@
 services:
+  nestjs-core-api:
+    environment:
+      ADMIN_JWT_HS256_SECRET: ${ADMIN_JWT_HS256_SECRET:?ADMIN_JWT_HS256_SECRET must be set in .env}
+      ADMIN_JWT_ISSUER: ${ADMIN_JWT_ISSUER:-fida-ride-admin}
+      ADMIN_JWT_AUDIENCE: ${ADMIN_JWT_AUDIENCE:-fida-admin}
+      ADMIN_REPORTING_TIME_ZONE: ${ADMIN_REPORTING_TIME_ZONE:-Africa/Kigali}
+      ADMIN_GEOFENCE_MAX_POINTS: ${ADMIN_GEOFENCE_MAX_POINTS:-10000}
+
   go-admin-stream-service:
     build:
       context: ./services/go-admin-stream-service
