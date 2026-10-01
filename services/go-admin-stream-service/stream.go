@@ -64,6 +64,7 @@ type adminStreamClient struct {
 	conn      *websocket.Conn
 	send      chan []byte
 	sessionID string
+	expiresAt time.Time
 
 	mu          sync.RWMutex
 	viewport    adminViewport
@@ -230,8 +231,14 @@ func (client *adminStreamClient) enqueue(payload []byte) {
 func (s *Server) adminStreamHandler(w http.ResponseWriter, r *http.Request) {
 	principal, err := s.authenticateAdminStream(r)
 	if err != nil {
-		s.logger.Warn("admin stream authentication rejected", "remote_ip", r.RemoteAddr)
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		status := http.StatusUnauthorized
+		message := "unauthorized"
+		if errors.Is(err, errAdminForbidden) {
+			status = http.StatusForbidden
+			message = "forbidden"
+		}
+		s.logger.Warn("admin stream authentication rejected", "remote_ip", r.RemoteAddr, "status", status)
+		http.Error(w, message, status)
 		return
 	}
 
@@ -246,6 +253,7 @@ func (s *Server) adminStreamHandler(w http.ResponseWriter, r *http.Request) {
 		conn:      conn,
 		send:      make(chan []byte, 2),
 		sessionID: principal.SessionID,
+		expiresAt: principal.ExpiresAt,
 	}
 	s.hub.register(client)
 	defer s.hub.unregister(client)
@@ -297,6 +305,11 @@ func (s *Server) adminWriterLoop(client *adminStreamClient, done <-chan struct{}
 				return
 			}
 		case <-ticker.C:
+			if !client.expiresAt.IsZero() && !time.Now().UTC().Before(client.expiresAt) {
+				_ = writeClose(client.conn, websocket.ClosePolicyViolation, "session expired")
+				_ = client.conn.Close()
+				return
+			}
 			if err := client.conn.WriteControl(
 				websocket.PingMessage,
 				[]byte("ping"),
