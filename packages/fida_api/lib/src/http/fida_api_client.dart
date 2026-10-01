@@ -57,11 +57,13 @@ final class FidaApiClient {
   Future<Map<String, Object?>> getJson(
     String path, {
     Map<String, Object?>? queryParameters,
+    Map<String, Object?>? headers,
   }) async {
     try {
       final Response<Object?> response = await _dio.get<Object?>(
         path,
         queryParameters: queryParameters,
+        options: headers == null ? null : Options(headers: headers),
       );
       return _asJsonObject(response.data);
     } on DioException catch (error) {
@@ -72,11 +74,13 @@ final class FidaApiClient {
   Future<Map<String, Object?>> postJson(
     String path, {
     Map<String, Object?>? body,
+    Map<String, Object?>? headers,
   }) async {
     try {
       final Response<Object?> response = await _dio.post<Object?>(
         path,
         data: body,
+        options: headers == null ? null : Options(headers: headers),
       );
       return _asJsonObject(response.data);
     } on DioException catch (error) {
