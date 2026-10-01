@@ -13,7 +13,7 @@ export class AdminSessionService {
   ) {}
 
   async create(principal: AdminJwtPrincipal): Promise<void> {
-    const ttlSeconds = this.config.getOrThrow<number>('ADMIN_JWT_ACCESS_TTL_SECONDS');
+    const ttlSeconds = this.config.get<number>('ADMIN_JWT_ACCESS_TTL_SECONDS', 900);
     const record: AdminSessionRecord = {
       sub: principal.sub,
       role: principal.role,
