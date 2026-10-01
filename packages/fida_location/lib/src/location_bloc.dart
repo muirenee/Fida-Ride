@@ -62,13 +62,14 @@ final class LocationBloc extends Bloc<LocationEvent, LocationState> {
   LocationBloc({
     LocationPublisher? publisher,
     LocationSettings? locationSettings,
-  })  : _publisher = publisher,
-        _locationSettings = locationSettings ??
-            const LocationSettings(
-              accuracy: LocationAccuracy.bestForNavigation,
-              distanceFilter: 5,
-            ),
-        super(const LocationInitial()) {
+  }) : _publisher = publisher,
+       _locationSettings =
+           locationSettings ??
+           const LocationSettings(
+             accuracy: LocationAccuracy.bestForNavigation,
+             distanceFilter: 5,
+           ),
+       super(const LocationInitial()) {
     on<StartTracking>(_onStartTracking);
     on<LocationUpdated>(_onLocationUpdated);
     on<StopTracking>(_onStopTracking);
@@ -110,26 +111,24 @@ final class LocationBloc extends Bloc<LocationEvent, LocationState> {
       }
 
       await _positionSubscription?.cancel();
-      _positionSubscription = Geolocator.getPositionStream(
-        locationSettings: _locationSettings,
-      ).listen(
-        (Position position) {
-          final double heading = position.heading.isFinite && position.heading >= 0
-              ? position.heading
-              : 0.0;
-          add(
-            LocationUpdated(
-              position.latitude,
-              position.longitude,
-              heading,
-            ),
+      _positionSubscription =
+          Geolocator.getPositionStream(
+            locationSettings: _locationSettings,
+          ).listen(
+            (Position position) {
+              final double heading =
+                  position.heading.isFinite && position.heading >= 0
+                  ? position.heading
+                  : 0.0;
+              add(
+                LocationUpdated(position.latitude, position.longitude, heading),
+              );
+            },
+            onError: (Object error, StackTrace stackTrace) {
+              add(_LocationStreamFailed(error.toString()));
+            },
+            cancelOnError: false,
           );
-        },
-        onError: (Object error, StackTrace stackTrace) {
-          add(_LocationStreamFailed(error.toString()));
-        },
-        cancelOnError: false,
-      );
     } catch (error) {
       emit(LocationTrackingFailure(error.toString()));
     }
