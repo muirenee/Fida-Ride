@@ -211,19 +211,33 @@ jobs:
         run: |
           set -euo pipefail
 
-          docker exec -i fida-ci-postgres \
-            psql -v ON_ERROR_STOP=1 \
-            -U fida_ride \
-            -d fida_ride_ci \
-            < init-db.sql
+          wait_for_postgres() {
+            for attempt in $(seq 1 30); do
+              if docker exec fida-ci-postgres \
+                pg_isready -U fida_ride -d fida_ride_ci >/dev/null 2>&1; then
+                return 0
+              fi
+              if [ "$attempt" -eq 30 ]; then
+                docker logs fida-ci-postgres
+                return 1
+              fi
+              sleep 1
+            done
+          }
+
+          apply_sql() {
+            local sql_file="$1"
+            echo "Applying ${sql_file}"
+            wait_for_postgres
+            docker exec -i fida-ci-postgres sh -lc \
+              'psql -v ON_ERROR_STOP=1 -U fida_ride -d fida_ride_ci' \
+              < "$sql_file"
+          }
+
+          apply_sql init-db.sql
 
           for migration in database/migrations/schema-v*.sql; do
-            echo "Applying ${migration}"
-            docker exec -i fida-ci-postgres \
-              psql -v ON_ERROR_STOP=1 \
-              -U fida_ride \
-              -d fida_ride_ci \
-              < "$migration"
+            apply_sql "$migration"
           done
 
       - name: Run NestJS integration smoke test
@@ -385,9 +399,6 @@ jobs:
             echo '::warning::No committed Flutter *_test.dart files were found. Add unit/widget tests to make this gate enforce assertions.'
           fi
 
-      # Native runner shells are intentionally generated only for branch pushes,
-      # keeping pull-request validation faster while still producing installable
-      # Android artifacts after accepted changes land on a delivery branch.
       - name: Set up Java for Android release builds
         if: github.event_name == 'push'
         uses: actions/setup-java@v6
