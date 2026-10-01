@@ -4,7 +4,7 @@ import 'package:uuid/uuid.dart';
 final class InstallationIdentityService {
   InstallationIdentityService({FlutterSecureStorage? storage, Uuid? uuid})
     : _storage = storage ?? const FlutterSecureStorage(),
-      _uuid = uuid ?? Uuid();
+      _uuid = uuid ?? const Uuid();
 
   static const String _storageKey = 'fida.installation.uuid.v1';
 
