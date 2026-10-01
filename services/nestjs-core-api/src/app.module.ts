@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from './auth/auth.module';
+import { BiddingModule } from './bidding/bidding.module';
 import { validateEnvironment } from './config/env.validation';
 import { DriverEntity } from './database/entities/driver.entity';
 import { TripEntity } from './database/entities/trip.entity';
@@ -42,6 +43,7 @@ import { UsersModule } from './users/users.module';
     UsersModule,
     AuthModule,
     RidesModule,
+    BiddingModule,
   ],
   controllers: [HealthController],
 })
