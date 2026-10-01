@@ -35,9 +35,13 @@ const (
 
 	maxTelemetryMessageBytes = 4 * 1024
 	maxDriverIDLength        = 128
+	maxSessionIDLength       = 128
 )
 
-var driverIDPattern = regexp.MustCompile(`^[A-Za-z0-9._:-]+$`)
+var (
+	driverIDPattern          = regexp.MustCompile(`^[A-Za-z0-9._:-]+$`)
+	telemetrySignaturePattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
+)
 
 type Config struct {
 	Addr                  string
@@ -62,6 +66,10 @@ type TelemetryPacket struct {
 	Longitude float64 `json:"longitude"`
 	Bearing   float64 `json:"bearing"`
 	Status    string  `json:"status"`
+	SessionID string  `json:"session_id"`
+	Timestamp int64   `json:"timestamp"`
+	Sequence  int64   `json:"sequence"`
+	Signature string  `json:"signature"`
 }
 
 type jwtHeader struct {
@@ -111,6 +119,10 @@ func main() {
 
 	if _, err := loadTelemetryFraudSettings(); err != nil {
 		logger.Error("invalid telemetry fraud configuration", "error", err)
+		os.Exit(1)
+	}
+	if _, err := loadTelemetrySignatureSettings(); err != nil {
+		logger.Error("invalid telemetry signature configuration", "error", err)
 		os.Exit(1)
 	}
 
@@ -341,6 +353,12 @@ func (s *Server) driverWebSocketHandler(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 
+		if err := s.verifyTelemetrySignature(packet); err != nil {
+			s.logger.Warn("signed telemetry rejected", "driver_id", driverID, "error", err)
+			_ = writeClose(conn, websocket.ClosePolicyViolation, "invalid telemetry security session")
+			return
+		}
+
 		verdict, err := s.validateTelemetryVelocity(packet)
 		if err != nil {
 			s.logger.Error("telemetry fraud validation failed", "driver_id", driverID, "error", err)
@@ -370,6 +388,8 @@ func (s *Server) driverWebSocketHandler(w http.ResponseWriter, r *http.Request) 
 			"latitude", packet.Latitude,
 			"longitude", packet.Longitude,
 			"status", packet.Status,
+			"session_id", packet.SessionID,
+			"sequence", packet.Sequence,
 		)
 	}
 }
@@ -509,6 +529,9 @@ func decodeTelemetry(payload []byte) (TelemetryPacket, error) {
 
 	packet.DriverID = strings.TrimSpace(packet.DriverID)
 	packet.Status = strings.TrimSpace(packet.Status)
+	packet.SessionID = strings.TrimSpace(packet.SessionID)
+	packet.Signature = strings.ToLower(strings.TrimSpace(packet.Signature))
+
 	if err := validateDriverID(packet.DriverID); err != nil {
 		return TelemetryPacket{}, err
 	}
@@ -523,6 +546,18 @@ func decodeTelemetry(payload []byte) (TelemetryPacket, error) {
 	}
 	if packet.Status == "" || len(packet.Status) > 32 {
 		return TelemetryPacket{}, errors.New("status is required and must be <= 32 characters")
+	}
+	if packet.SessionID == "" || len(packet.SessionID) > maxSessionIDLength || !driverIDPattern.MatchString(packet.SessionID) {
+		return TelemetryPacket{}, errors.New("session_id is required and invalid")
+	}
+	if packet.Timestamp <= 0 {
+		return TelemetryPacket{}, errors.New("timestamp must be a positive Unix millisecond value")
+	}
+	if packet.Sequence <= 0 {
+		return TelemetryPacket{}, errors.New("sequence must be positive")
+	}
+	if !telemetrySignaturePattern.MatchString(packet.Signature) {
+		return TelemetryPacket{}, errors.New("signature must be a lowercase 64-character SHA-256 hex digest")
 	}
 	return packet, nil
 }
