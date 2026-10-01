@@ -1,0 +1,90 @@
+services:
+  go-admin-stream-service:
+    build:
+      context: ./services/go-admin-stream-service
+      dockerfile: Dockerfile
+    image: fida-ride/go-admin-stream-service:local
+    container_name: fida-ride-go-admin-stream
+    restart: unless-stopped
+    init: true
+    environment:
+      HTTP_ADDR: ":8090"
+      REDIS_ADDR: redis:6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}
+      REDIS_DB: ${CORE_REDIS_DB:-0}
+      ADMIN_JWT_HS256_SECRET: ${ADMIN_JWT_HS256_SECRET:?ADMIN_JWT_HS256_SECRET must be set in .env}
+      ADMIN_JWT_ISSUER: ${ADMIN_JWT_ISSUER:-fida-ride-admin}
+      ADMIN_JWT_AUDIENCE: ${ADMIN_JWT_AUDIENCE:-fida-admin}
+      ADMIN_WS_ALLOWED_ORIGINS: ${ADMIN_WS_ALLOWED_ORIGINS:-http://127.0.0.1:3001,http://localhost:3001}
+      ADMIN_STREAM_FLUSH_INTERVAL: ${ADMIN_STREAM_FLUSH_INTERVAL:-250ms}
+      ADMIN_STREAM_MAX_BATCH: ${ADMIN_STREAM_MAX_BATCH:-5000}
+      WS_IDLE_TIMEOUT: ${ADMIN_WS_IDLE_TIMEOUT:-60s}
+      WS_PING_INTERVAL: ${ADMIN_WS_PING_INTERVAL:-25s}
+    ports:
+      - "127.0.0.1:${ADMIN_STREAM_PORT:-8090}:8090"
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - 'wget -q -O /dev/null http://127.0.0.1:8090/healthz || exit 1'
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - fida-ride-network
+
+  fida-admin-web:
+    build:
+      context: ./apps/fida_admin
+      dockerfile: Dockerfile
+      args:
+        CORE_API_INTERNAL_URL: http://nestjs-core-api:3000
+        NEXT_PUBLIC_ADMIN_STREAM_URL: ${NEXT_PUBLIC_ADMIN_STREAM_URL:-ws://127.0.0.1:8090/admin/stream}
+        NEXT_PUBLIC_MAP_STYLE_URL: ${NEXT_PUBLIC_MAP_STYLE_URL:-https://demotiles.maplibre.org/style.json}
+    image: fida-ride/admin-web:local
+    container_name: fida-ride-admin-web
+    restart: unless-stopped
+    init: true
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      HOSTNAME: 0.0.0.0
+    ports:
+      - "127.0.0.1:${ADMIN_WEB_PORT:-3001}:3000"
+    depends_on:
+      nestjs-core-api:
+        condition: service_healthy
+      go-admin-stream-service:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - 'wget -q -O /dev/null http://127.0.0.1:3000/ || exit 1'
+      interval: 10s
+      timeout: 3s
+      retries: 8
+      start_period: 20s
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - fida-ride-network
+
+networks:
+  fida-ride-network:
+    name: fida-ride-local
+    driver: bridge
