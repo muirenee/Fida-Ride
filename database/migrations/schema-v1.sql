@@ -1,19 +1,23 @@
 -- Fida-Ride core relational schema v1
 -- PostgreSQL 15+ with PostGIS enabled.
--- Financial note: cached balance columns are for read performance only.
--- The authoritative financial source of truth is the immutable double-entry ledger.
+--
+-- Design rules:
+--   1. GPS geometry uses SRID 4326 (WGS 84).
+--   2. Redis remains the real-time driver-location store; PostgreSQL persists
+--      transactional/geospatial history.
+--   3. Cached wallet balances are read optimizations only. The immutable,
+--      posted double-entry ledger is the financial source of truth.
 
 BEGIN;
 
 CREATE EXTENSION IF NOT EXISTS postgis;
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-
 CREATE SCHEMA IF NOT EXISTS core AUTHORIZATION CURRENT_USER;
 
 SET LOCAL search_path TO core, public;
 
 -- -----------------------------------------------------------------------------
--- Shared updated_at trigger
+-- Shared timestamp trigger
 -- -----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION core.set_updated_at()
 RETURNS TRIGGER
@@ -35,7 +39,7 @@ CREATE TABLE IF NOT EXISTS core.users (
     email               VARCHAR(320),
     phone               VARCHAR(32),
 
-    -- Cached/read-optimized balance only. Ledger remains authoritative.
+    -- Cached balance only; ledger is authoritative.
     wallet_balance      NUMERIC(19,4) NOT NULL DEFAULT 0,
     wallet_currency     CHAR(3) NOT NULL DEFAULT 'RWF',
 
@@ -55,6 +59,7 @@ CREATE TABLE IF NOT EXISTS core.users (
         CHECK (wallet_currency ~ '^[A-Z]{3}$')
 );
 
+-- PostgreSQL unique indexes are B-tree by default.
 CREATE UNIQUE INDEX IF NOT EXISTS uq_users_email_ci
     ON core.users (LOWER(email))
     WHERE email IS NOT NULL;
@@ -78,15 +83,15 @@ EXECUTE FUNCTION core.set_updated_at();
 CREATE TABLE IF NOT EXISTS core.drivers (
     id                      UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id                 UUID NOT NULL UNIQUE,
-
     vehicle_type            VARCHAR(32) NOT NULL,
     license_plate           VARCHAR(32) NOT NULL,
     verification_status     VARCHAR(24) NOT NULL DEFAULT 'pending',
 
-    -- Cached/read-optimized balance only. Ledger remains authoritative.
+    -- Cached balance only; ledger is authoritative.
     current_wallet_balance  NUMERIC(19,4) NOT NULL DEFAULT 0,
     wallet_currency         CHAR(3) NOT NULL DEFAULT 'RWF',
 
+    -- Operational snapshot only. Real-time availability/location lives in Redis.
     is_online               BOOLEAN NOT NULL DEFAULT FALSE,
     is_available            BOOLEAN NOT NULL DEFAULT FALSE,
 
@@ -143,7 +148,6 @@ CREATE TABLE IF NOT EXISTS core.trips (
     driver_id           UUID,
 
     status              VARCHAR(24) NOT NULL DEFAULT 'created',
-
     fare_amount         NUMERIC(19,4),
     currency            CHAR(3) NOT NULL DEFAULT 'RWF',
     surge_multiplier    NUMERIC(8,4) NOT NULL DEFAULT 1.0000,
@@ -202,18 +206,15 @@ CREATE TABLE IF NOT EXISTS core.trips (
         )
 );
 
--- Native PostGIS GiST indexes for spatial filtering and bounding-box searches.
+-- PostGIS GiST indexes accelerate bounding-box/spatial predicates.
 CREATE INDEX IF NOT EXISTS idx_trips_pickup_location_gist
-    ON core.trips
-    USING GIST (pickup_location);
+    ON core.trips USING GIST (pickup_location);
 
 CREATE INDEX IF NOT EXISTS idx_trips_dropoff_location_gist
-    ON core.trips
-    USING GIST (dropoff_location);
+    ON core.trips USING GIST (dropoff_location);
 
 CREATE INDEX IF NOT EXISTS idx_trips_ride_path_gist
-    ON core.trips
-    USING GIST (ride_path);
+    ON core.trips USING GIST (ride_path);
 
 CREATE INDEX IF NOT EXISTS idx_trips_status
     ON core.trips (status);
@@ -241,7 +242,6 @@ EXECUTE FUNCTION core.set_updated_at();
 
 -- -----------------------------------------------------------------------------
 -- Ledger accounts
--- Supporting structure required for rigorous double-entry accounting.
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS core.ledger_accounts (
     id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -261,10 +261,17 @@ CREATE TABLE IF NOT EXISTS core.ledger_accounts (
     CONSTRAINT chk_ledger_accounts_currency
         CHECK (currency ~ '^[A-Z]{3}$'),
     CONSTRAINT chk_ledger_accounts_status
-        CHECK (status IN ('active', 'frozen', 'closed')),
-    CONSTRAINT uq_ledger_account_identity
-        UNIQUE (owner_type, owner_id, account_code, currency)
+        CHECK (status IN ('active', 'frozen', 'closed'))
 );
+
+-- COALESCE makes NULL-owner platform/system accounts unique as well.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_ledger_account_identity
+    ON core.ledger_accounts (
+        owner_type,
+        COALESCE(owner_id, '00000000-0000-0000-0000-000000000000'::UUID),
+        account_code,
+        currency
+    );
 
 CREATE INDEX IF NOT EXISTS idx_ledger_accounts_owner
     ON core.ledger_accounts (owner_type, owner_id);
@@ -277,18 +284,16 @@ EXECUTE FUNCTION core.set_updated_at();
 
 -- -----------------------------------------------------------------------------
 -- Driver wallets
--- One wallet per driver/currency; balance is a cache/reconciliation aid only.
+-- One wallet per driver/currency. Balance is a cache/reconciliation aid only.
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS core.driver_wallets (
     id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     driver_id           UUID NOT NULL,
     ledger_account_id   UUID NOT NULL UNIQUE,
     currency            CHAR(3) NOT NULL,
-
     balance             NUMERIC(19,4) NOT NULL DEFAULT 0,
     reserved_balance    NUMERIC(19,4) NOT NULL DEFAULT 0,
     version             BIGINT NOT NULL DEFAULT 0,
-
     created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
@@ -315,6 +320,44 @@ CREATE TABLE IF NOT EXISTS core.driver_wallets (
 CREATE INDEX IF NOT EXISTS idx_driver_wallets_driver
     ON core.driver_wallets (driver_id);
 
+CREATE OR REPLACE FUNCTION core.assert_driver_wallet_account()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_owner_type VARCHAR(24);
+    v_owner_id   UUID;
+    v_currency   CHAR(3);
+BEGIN
+    SELECT owner_type, owner_id, currency
+      INTO v_owner_type, v_owner_id, v_currency
+      FROM core.ledger_accounts
+     WHERE id = NEW.ledger_account_id;
+
+    IF v_owner_type IS NULL THEN
+        RAISE EXCEPTION 'Ledger account % does not exist', NEW.ledger_account_id;
+    END IF;
+
+    IF v_owner_type <> 'driver'
+       OR v_owner_id IS DISTINCT FROM NEW.driver_id
+       OR v_currency <> NEW.currency THEN
+        RAISE EXCEPTION
+            'Driver wallet/account mismatch for driver %, account %',
+            NEW.driver_id,
+            NEW.ledger_account_id;
+    END IF;
+
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_driver_wallet_account ON core.driver_wallets;
+CREATE TRIGGER trg_driver_wallet_account
+BEFORE INSERT OR UPDATE OF driver_id, ledger_account_id, currency
+ON core.driver_wallets
+FOR EACH ROW
+EXECUTE FUNCTION core.assert_driver_wallet_account();
+
 DROP TRIGGER IF EXISTS trg_driver_wallets_set_updated_at ON core.driver_wallets;
 CREATE TRIGGER trg_driver_wallets_set_updated_at
 BEFORE UPDATE ON core.driver_wallets
@@ -323,7 +366,8 @@ EXECUTE FUNCTION core.set_updated_at();
 
 -- -----------------------------------------------------------------------------
 -- Ledger transaction headers
--- Immutable business event / journal header. Idempotency prevents duplicate money.
+-- Pending journals may be assembled; once posted they become immutable.
+-- idempotency_key prevents duplicate financial effects from retries/webhooks.
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS core.ledger_transactions (
     id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -332,10 +376,12 @@ CREATE TABLE IF NOT EXISTS core.ledger_transactions (
     reference_id        UUID,
     idempotency_key     VARCHAR(128) NOT NULL UNIQUE,
     currency            CHAR(3) NOT NULL,
+    status              VARCHAR(16) NOT NULL DEFAULT 'pending',
     description         TEXT,
     metadata            JSONB NOT NULL DEFAULT '{}'::JSONB,
-    posted_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    posted_at           TIMESTAMPTZ,
     created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
     CONSTRAINT chk_ledger_transactions_type
         CHECK (transaction_type IN (
@@ -349,22 +395,30 @@ CREATE TABLE IF NOT EXISTS core.ledger_transactions (
             'adjustment'
         )),
     CONSTRAINT chk_ledger_transactions_currency
-        CHECK (currency ~ '^[A-Z]{3}$')
+        CHECK (currency ~ '^[A-Z]{3}$'),
+    CONSTRAINT chk_ledger_transactions_status
+        CHECK (status IN ('pending', 'posted')),
+    CONSTRAINT chk_ledger_transactions_posted_at
+        CHECK (
+            (status = 'pending' AND posted_at IS NULL)
+            OR
+            (status = 'posted' AND posted_at IS NOT NULL)
+        )
 );
 
-CREATE INDEX IF NOT EXISTS idx_ledger_transactions_type_posted
-    ON core.ledger_transactions (transaction_type, posted_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ledger_transactions_type_created
+    ON core.ledger_transactions (transaction_type, created_at DESC);
 
 CREATE INDEX IF NOT EXISTS idx_ledger_transactions_reference
     ON core.ledger_transactions (reference_type, reference_id)
     WHERE reference_id IS NOT NULL;
 
-CREATE INDEX IF NOT EXISTS idx_ledger_transactions_posted_at
-    ON core.ledger_transactions (posted_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ledger_transactions_status_created
+    ON core.ledger_transactions (status, created_at DESC);
 
 -- -----------------------------------------------------------------------------
 -- Ledger entries
--- Every transaction has two or more lines whose debits and credits must balance.
+-- Every posted transaction must have >= 2 lines and total debits = credits.
 -- -----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS core.ledger_entries (
     id                  UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -398,137 +452,213 @@ CREATE INDEX IF NOT EXISTS idx_ledger_entries_transaction
 CREATE INDEX IF NOT EXISTS idx_ledger_entries_account_created
     ON core.ledger_entries (ledger_account_id, created_at DESC);
 
--- Enforce currency consistency between a journal header and each participating account.
-CREATE OR REPLACE FUNCTION core.assert_ledger_entry_currency_matches()
+-- Serializes ledger-line mutation against posting by locking the parent journal row.
+-- This prevents a concurrent writer from appending a line after another session posts it.
+CREATE OR REPLACE FUNCTION core.guard_ledger_entry_mutation()
 RETURNS TRIGGER
 LANGUAGE plpgsql
 AS $$
 DECLARE
-    tx_currency      CHAR(3);
-    account_currency CHAR(3);
+    v_transaction_id UUID;
+    v_account_id     UUID;
+    v_tx_status      VARCHAR(16);
+    v_tx_currency    CHAR(3);
+    v_account_currency CHAR(3);
 BEGIN
-    SELECT currency
-      INTO tx_currency
-      FROM core.ledger_transactions
-     WHERE id = NEW.transaction_id;
-
-    SELECT currency
-      INTO account_currency
-      FROM core.ledger_accounts
-     WHERE id = NEW.ledger_account_id;
-
-    IF tx_currency IS NULL OR account_currency IS NULL THEN
-        RAISE EXCEPTION 'Ledger transaction/account currency lookup failed';
+    IF TG_OP = 'DELETE' THEN
+        v_transaction_id := OLD.transaction_id;
+        v_account_id := OLD.ledger_account_id;
+    ELSE
+        v_transaction_id := NEW.transaction_id;
+        v_account_id := NEW.ledger_account_id;
     END IF;
 
-    IF tx_currency <> account_currency THEN
+    SELECT status, currency
+      INTO v_tx_status, v_tx_currency
+      FROM core.ledger_transactions
+     WHERE id = v_transaction_id
+     FOR UPDATE;
+
+    IF v_tx_status IS NULL THEN
+        RAISE EXCEPTION 'Ledger transaction % does not exist', v_transaction_id;
+    END IF;
+
+    IF v_tx_status <> 'pending' THEN
         RAISE EXCEPTION
-            'Currency mismatch for transaction %, transaction currency %, account currency %',
-            NEW.transaction_id,
-            tx_currency,
-            account_currency;
+            'Ledger transaction % is posted and immutable',
+            v_transaction_id;
+    END IF;
+
+    IF TG_OP <> 'DELETE' THEN
+        SELECT currency
+          INTO v_account_currency
+          FROM core.ledger_accounts
+         WHERE id = v_account_id;
+
+        IF v_account_currency IS NULL THEN
+            RAISE EXCEPTION 'Ledger account % does not exist', v_account_id;
+        END IF;
+
+        IF v_tx_currency <> v_account_currency THEN
+            RAISE EXCEPTION
+                'Currency mismatch for transaction %, transaction currency %, account currency %',
+                v_transaction_id,
+                v_tx_currency,
+                v_account_currency;
+        END IF;
+    END IF;
+
+    IF TG_OP = 'DELETE' THEN
+        RETURN OLD;
     END IF;
 
     RETURN NEW;
 END;
 $$;
 
-DROP TRIGGER IF EXISTS trg_ledger_entry_currency ON core.ledger_entries;
-CREATE TRIGGER trg_ledger_entry_currency
-BEFORE INSERT OR UPDATE ON core.ledger_entries
+DROP TRIGGER IF EXISTS trg_guard_ledger_entry_mutation ON core.ledger_entries;
+CREATE TRIGGER trg_guard_ledger_entry_mutation
+BEFORE INSERT OR UPDATE OR DELETE ON core.ledger_entries
 FOR EACH ROW
-EXECUTE FUNCTION core.assert_ledger_entry_currency_matches();
+EXECUTE FUNCTION core.guard_ledger_entry_mutation();
 
--- A deferred constraint trigger validates that all lines for a transaction balance
--- before the SQL transaction commits. This allows callers to insert debit and credit
--- lines independently inside a single database transaction without transient failures.
-CREATE OR REPLACE FUNCTION core.assert_ledger_transaction_balanced()
-RETURNS TRIGGER
+-- Posting is the accounting commit point. The row lock serializes posting against
+-- ledger-line mutations; the balance is checked in the same DB transaction.
+CREATE OR REPLACE FUNCTION core.post_ledger_transaction(p_transaction_id UUID)
+RETURNS VOID
 LANGUAGE plpgsql
 AS $$
 DECLARE
-    v_transaction_id UUID;
-    debit_total      NUMERIC(19,4);
-    credit_total     NUMERIC(19,4);
-    line_count       BIGINT;
+    v_status       VARCHAR(16);
+    v_debit_total  NUMERIC(19,4);
+    v_credit_total NUMERIC(19,4);
+    v_line_count   BIGINT;
 BEGIN
-    v_transaction_id := COALESCE(NEW.transaction_id, OLD.transaction_id);
+    SELECT status
+      INTO v_status
+      FROM core.ledger_transactions
+     WHERE id = p_transaction_id
+     FOR UPDATE;
+
+    IF v_status IS NULL THEN
+        RAISE EXCEPTION 'Ledger transaction % does not exist', p_transaction_id;
+    END IF;
+
+    IF v_status = 'posted' THEN
+        -- Idempotent posting: an already-posted transaction is a no-op.
+        RETURN;
+    END IF;
 
     SELECT
         COALESCE(SUM(amount) FILTER (WHERE entry_side = 'debit'), 0),
         COALESCE(SUM(amount) FILTER (WHERE entry_side = 'credit'), 0),
         COUNT(*)
-      INTO debit_total, credit_total, line_count
+      INTO v_debit_total, v_credit_total, v_line_count
       FROM core.ledger_entries
-     WHERE transaction_id = v_transaction_id;
+     WHERE transaction_id = p_transaction_id;
 
-    IF line_count < 2 THEN
+    IF v_line_count < 2 THEN
         RAISE EXCEPTION
             'Ledger transaction % must contain at least two entries',
-            v_transaction_id;
+            p_transaction_id;
     END IF;
 
-    IF debit_total <> credit_total THEN
+    IF v_debit_total <> v_credit_total THEN
         RAISE EXCEPTION
             'Unbalanced ledger transaction %: debits %, credits %',
-            v_transaction_id,
-            debit_total,
-            credit_total;
+            p_transaction_id,
+            v_debit_total,
+            v_credit_total;
     END IF;
 
-    RETURN NULL;
+    UPDATE core.ledger_transactions
+       SET status = 'posted',
+           posted_at = NOW(),
+           updated_at = NOW()
+     WHERE id = p_transaction_id;
 END;
 $$;
 
-DROP TRIGGER IF EXISTS trg_ledger_transaction_balanced ON core.ledger_entries;
-CREATE CONSTRAINT TRIGGER trg_ledger_transaction_balanced
-AFTER INSERT OR UPDATE OR DELETE ON core.ledger_entries
-DEFERRABLE INITIALLY DEFERRED
-FOR EACH ROW
-EXECUTE FUNCTION core.assert_ledger_transaction_balanced();
+-- Direct attempts to mark a transaction posted must satisfy the same accounting rules.
+CREATE OR REPLACE FUNCTION core.validate_ledger_transaction_update()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    v_debit_total  NUMERIC(19,4);
+    v_credit_total NUMERIC(19,4);
+    v_line_count   BIGINT;
+BEGIN
+    IF OLD.status = 'posted' THEN
+        RAISE EXCEPTION
+            'Posted ledger transaction % is immutable; use a compensating transaction',
+            OLD.id;
+    END IF;
 
--- -----------------------------------------------------------------------------
--- Prevent destructive mutations of posted ledger history.
--- Corrections must be expressed as new compensating transactions.
--- -----------------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION core.prevent_ledger_mutation()
+    IF NEW.status = 'posted' AND OLD.status <> 'posted' THEN
+        SELECT
+            COALESCE(SUM(amount) FILTER (WHERE entry_side = 'debit'), 0),
+            COALESCE(SUM(amount) FILTER (WHERE entry_side = 'credit'), 0),
+            COUNT(*)
+          INTO v_debit_total, v_credit_total, v_line_count
+          FROM core.ledger_entries
+         WHERE transaction_id = OLD.id;
+
+        IF v_line_count < 2 OR v_debit_total <> v_credit_total THEN
+            RAISE EXCEPTION
+                'Cannot post unbalanced ledger transaction %: lines %, debits %, credits %',
+                OLD.id,
+                v_line_count,
+                v_debit_total,
+                v_credit_total;
+        END IF;
+
+        NEW.posted_at := COALESCE(NEW.posted_at, NOW());
+    END IF;
+
+    NEW.updated_at := NOW();
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_validate_ledger_transaction_update ON core.ledger_transactions;
+CREATE TRIGGER trg_validate_ledger_transaction_update
+BEFORE UPDATE ON core.ledger_transactions
+FOR EACH ROW
+EXECUTE FUNCTION core.validate_ledger_transaction_update();
+
+CREATE OR REPLACE FUNCTION core.prevent_ledger_transaction_delete()
 RETURNS TRIGGER
 LANGUAGE plpgsql
 AS $$
 BEGIN
     RAISE EXCEPTION
-        'Posted ledger records are immutable; create a compensating transaction instead';
+        'Ledger transactions cannot be deleted; use a compensating transaction';
 END;
 $$;
 
-DROP TRIGGER IF EXISTS trg_prevent_ledger_transaction_update_delete ON core.ledger_transactions;
-CREATE TRIGGER trg_prevent_ledger_transaction_update_delete
-BEFORE UPDATE OR DELETE ON core.ledger_transactions
+DROP TRIGGER IF EXISTS trg_prevent_ledger_transaction_delete ON core.ledger_transactions;
+CREATE TRIGGER trg_prevent_ledger_transaction_delete
+BEFORE DELETE ON core.ledger_transactions
 FOR EACH ROW
-EXECUTE FUNCTION core.prevent_ledger_mutation();
-
-DROP TRIGGER IF EXISTS trg_prevent_ledger_entry_update_delete ON core.ledger_entries;
-CREATE TRIGGER trg_prevent_ledger_entry_update_delete
-BEFORE UPDATE OR DELETE ON core.ledger_entries
-FOR EACH ROW
-EXECUTE FUNCTION core.prevent_ledger_mutation();
+EXECUTE FUNCTION core.prevent_ledger_transaction_delete();
 
 -- -----------------------------------------------------------------------------
--- Comments documenting authoritative vs cached balances
+-- Documentation
 -- -----------------------------------------------------------------------------
 COMMENT ON COLUMN core.users.wallet_balance IS
-    'Read-optimized cached wallet balance. Do not treat as the financial source of truth.';
+    'Read-optimized cached balance. Do not treat as the financial source of truth.';
 
 COMMENT ON COLUMN core.drivers.current_wallet_balance IS
     'Read-optimized cached driver balance. Authoritative value derives from the ledger.';
 
 COMMENT ON COLUMN core.driver_wallets.balance IS
-    'Cached materialized wallet balance for fast reads; reconcile against double-entry ledger.';
+    'Cached wallet balance for fast reads; authoritative value derives from posted ledger entries.';
 
 COMMENT ON TABLE core.ledger_transactions IS
-    'Immutable journal headers. Duplicate monetary events are blocked by idempotency_key.';
+    'Journal headers. Build while pending; post atomically after debit/credit validation.';
 
 COMMENT ON TABLE core.ledger_entries IS
-    'Immutable debit/credit journal lines. Deferred trigger requires total debits = total credits.';
+    'Double-entry debit/credit lines. Lines become immutable when their journal is posted.';
 
 COMMIT;
