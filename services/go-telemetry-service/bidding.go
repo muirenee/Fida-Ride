@@ -8,12 +8,18 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
 )
 
 const biddingEventsChan = "bidding:events"
+
+var (
+	riderConnMu sync.RWMutex
+	riderConns  = make(map[string]map[*websocket.Conn]struct{})
+)
 
 type BiddingEvent struct {
 	Event        string  `json:"event"`
@@ -177,13 +183,13 @@ func (s *Server) runBiddingEventSubscriber(ctx context.Context) {
 }
 
 func (s *Server) broadcastToRider(riderID string, payload RiderCounterOfferEvent) {
-	s.riderConnMu.RLock()
-	connectionsMap := s.riderConns[riderID]
+	riderConnMu.RLock()
+	connectionsMap := riderConns[riderID]
 	connections := make([]*websocket.Conn, 0, len(connectionsMap))
 	for conn := range connectionsMap {
 		connections = append(connections, conn)
 	}
-	s.riderConnMu.RUnlock()
+	riderConnMu.RUnlock()
 
 	for _, conn := range connections {
 		_ = conn.SetWriteDeadline(time.Now().Add(2 * time.Second))
@@ -196,24 +202,24 @@ func (s *Server) broadcastToRider(riderID string, payload RiderCounterOfferEvent
 }
 
 func (s *Server) registerRiderConnection(conn *websocket.Conn, riderID string) {
-	s.riderConnMu.Lock()
-	defer s.riderConnMu.Unlock()
-	if s.riderConns[riderID] == nil {
-		s.riderConns[riderID] = make(map[*websocket.Conn]struct{})
+	riderConnMu.Lock()
+	defer riderConnMu.Unlock()
+	if riderConns[riderID] == nil {
+		riderConns[riderID] = make(map[*websocket.Conn]struct{})
 	}
-	s.riderConns[riderID][conn] = struct{}{}
+	riderConns[riderID][conn] = struct{}{}
 }
 
 func (s *Server) unregisterRiderConnection(conn *websocket.Conn, riderID string) {
-	s.riderConnMu.Lock()
-	defer s.riderConnMu.Unlock()
-	connections := s.riderConns[riderID]
+	riderConnMu.Lock()
+	defer riderConnMu.Unlock()
+	connections := riderConns[riderID]
 	if connections == nil {
 		return
 	}
 	delete(connections, conn)
 	if len(connections) == 0 {
-		delete(s.riderConns, riderID)
+		delete(riderConns, riderID)
 	}
 }
 
@@ -235,14 +241,14 @@ func (s *Server) riderPingLoop(conn *websocket.Conn, riderID string, done <-chan
 }
 
 func (s *Server) closeAllRiderConnections(reason string) {
-	s.riderConnMu.RLock()
+	riderConnMu.RLock()
 	connections := make([]*websocket.Conn, 0)
-	for _, riderConnections := range s.riderConns {
+	for _, riderConnections := range riderConns {
 		for conn := range riderConnections {
 			connections = append(connections, conn)
 		}
 	}
-	s.riderConnMu.RUnlock()
+	riderConnMu.RUnlock()
 
 	for _, conn := range connections {
 		_ = writeClose(conn, websocket.CloseGoingAway, reason)
