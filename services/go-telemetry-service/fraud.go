@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -15,6 +16,12 @@ import (
 const (
 	telemetryFraudStatePrefix = "fraud:telemetry:last:"
 	telemetrySecurityChannel  = "security:telemetry-events"
+)
+
+var (
+	telemetryFraudSettingsOnce sync.Once
+	telemetryFraudSettingsValue telemetryFraudSettings
+	telemetryFraudSettingsErr error
 )
 
 type telemetryFraudSettings struct {
@@ -54,6 +61,13 @@ type TelemetryVelocityJumpEvent struct {
 }
 
 func loadTelemetryFraudSettings() (telemetryFraudSettings, error) {
+	telemetryFraudSettingsOnce.Do(func() {
+		telemetryFraudSettingsValue, telemetryFraudSettingsErr = parseTelemetryFraudSettings()
+	})
+	return telemetryFraudSettingsValue, telemetryFraudSettingsErr
+}
+
+func parseTelemetryFraudSettings() (telemetryFraudSettings, error) {
 	maxSpeed, err := fraudEnvFloat("TELEMETRY_MAX_SPEED_KPH", 160)
 	if err != nil {
 		return telemetryFraudSettings{}, err
