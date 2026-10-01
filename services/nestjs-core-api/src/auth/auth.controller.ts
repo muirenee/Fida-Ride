@@ -9,6 +9,7 @@ import {
 } from '@nestjs/common';
 import { AttestationVerificationGuard } from '../attestation/attestation-verification.guard';
 import { RequireAttestation } from '../attestation/require-attestation.decorator';
+import { DriverFinancialGuard } from '../finance/driver-financial.guard';
 import { AuthenticatedRequest, JwtAuthGuard } from './jwt-auth.guard';
 import { AuthService } from './auth.service';
 import { RequestPhoneLoginDto, VerifyPhoneLoginDto } from './dto/phone-login.dto';
@@ -52,7 +53,7 @@ export class AuthController {
   @Post('telemetry-session')
   @HttpCode(HttpStatus.CREATED)
   @RequireAttestation('telemetry_session')
-  @UseGuards(JwtAuthGuard, AttestationVerificationGuard)
+  @UseGuards(JwtAuthGuard, AttestationVerificationGuard, DriverFinancialGuard)
   createTelemetrySession(
     @Body() _dto: TelemetrySessionDto,
     @Req() request: AuthenticatedRequest,
