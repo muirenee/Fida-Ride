@@ -22,6 +22,9 @@ final class MapScreen extends StatefulWidget {
     this.followTrackedLocation = true,
     this.showTrackingControl = true,
     this.tileUrlTemplate = _defaultTileUrlTemplate,
+    this.destinationLatitude,
+    this.destinationLongitude,
+    this.onMapTap,
   });
 
   final double initialLatitude;
@@ -30,6 +33,9 @@ final class MapScreen extends StatefulWidget {
   final bool followTrackedLocation;
   final bool showTrackingControl;
   final String tileUrlTemplate;
+  final double? destinationLatitude;
+  final double? destinationLongitude;
+  final void Function(double latitude, double longitude)? onMapTap;
 
   @override
   State<MapScreen> createState() => _MapScreenState();
@@ -144,6 +150,23 @@ final class _MapScreenState extends State<MapScreen>
       );
     }
 
+    final double? destinationLatitude = widget.destinationLatitude;
+    final double? destinationLongitude = widget.destinationLongitude;
+    if (destinationLatitude != null && destinationLongitude != null) {
+      markers.add(
+        Marker(
+          point: LatLng(destinationLatitude, destinationLongitude),
+          width: 48,
+          height: 48,
+          child: const Icon(
+            Icons.location_pin,
+            color: Colors.black,
+            size: 44,
+          ),
+        ),
+      );
+    }
+
     return markers;
   }
 
@@ -173,6 +196,9 @@ final class _MapScreenState extends State<MapScreen>
                   maxZoom: 19,
                   onMapReady: () {
                     _mapReady = true;
+                  },
+                  onTap: (TapPosition _, LatLng point) {
+                    widget.onMapTap?.call(point.latitude, point.longitude);
                   },
                 ),
                 children: <Widget>[
