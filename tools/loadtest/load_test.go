@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -108,6 +109,17 @@ type Harness struct {
 	redis       *redis.Client
 	driversByID map[string]DriverCredential
 	bidSem      chan struct{}
+
+	latencyMu sync.Mutex
+	latencies map[string][]int64
+}
+
+type LatencySnapshot struct {
+	Count int
+	Avg   time.Duration
+	P50   time.Duration
+	P95   time.Duration
+	P99   time.Duration
 }
 
 func TestLoad(t *testing.T) {
@@ -164,6 +176,7 @@ func TestLoad(t *testing.T) {
 	<-ctx.Done()
 	wg.Wait()
 	h.printReport("FINAL")
+	h.printLatencyReport()
 }
 
 func readFixture(path string) (Fixture, error) {
@@ -206,6 +219,7 @@ func newHarness(f Fixture) *Harness {
 		}),
 		driversByID: drivers,
 		bidSem:      make(chan struct{}, 256),
+		latencies:   make(map[string][]int64),
 	}
 }
 
@@ -454,13 +468,16 @@ func (h *Harness) post(ctx context.Context, path, token string, body any, out *m
 	req.Header.Set("Content-Type", "application/json")
 	h.metrics.httpTotal.Add(1)
 
+	started := time.Now()
 	resp, err := h.client.Do(req)
 	if err != nil {
+		h.recordLatency(path, time.Since(started))
 		h.metrics.httpErrors.Add(1)
 		return 0, err
 	}
 	defer resp.Body.Close()
 	payload, err := io.ReadAll(io.LimitReader(resp.Body, 32768))
+	h.recordLatency(path, time.Since(started))
 	if err != nil {
 		h.metrics.httpErrors.Add(1)
 		return resp.StatusCode, err
@@ -479,6 +496,50 @@ func (h *Harness) post(ctx context.Context, path, token string, body any, out *m
 		}
 	}
 	return resp.StatusCode, nil
+}
+
+func (h *Harness) recordLatency(path string, elapsed time.Duration) {
+	if elapsed < 0 {
+		return
+	}
+	h.latencyMu.Lock()
+	h.latencies[path] = append(h.latencies[path], int64(elapsed))
+	h.latencyMu.Unlock()
+}
+
+func (h *Harness) latencySnapshot(path string) LatencySnapshot {
+	h.latencyMu.Lock()
+	values := append([]int64(nil), h.latencies[path]...)
+	h.latencyMu.Unlock()
+
+	if len(values) == 0 {
+		return LatencySnapshot{}
+	}
+	sort.Slice(values, func(i, j int) bool { return values[i] < values[j] })
+
+	var total int64
+	for _, value := range values {
+		total += value
+	}
+
+	percentile := func(p float64) time.Duration {
+		index := int(math.Ceil(float64(len(values))*p)) - 1
+		if index < 0 {
+			index = 0
+		}
+		if index >= len(values) {
+			index = len(values) - 1
+		}
+		return time.Duration(values[index])
+	}
+
+	return LatencySnapshot{
+		Count: len(values),
+		Avg:   time.Duration(total / int64(len(values))),
+		P50:   percentile(0.50),
+		P95:   percentile(0.95),
+		P99:   percentile(0.99),
+	}
 }
 
 func (h *Harness) reporter(ctx context.Context) {
@@ -506,4 +567,20 @@ func (h *Harness) printReport(prefix string) {
 		total, h.metrics.httpErrors.Load(), ratio, h.metrics.expectedConflicts.Load(),
 		h.metrics.ridesOK.Load(), h.metrics.bidsOK.Load(), h.metrics.acceptsOK.Load(),
 	)
+}
+
+
+func (h *Harness) printLatencyReport() {
+	for _, path := range []string{"/rides/request", "/bidding/negotiate", "/bidding/accept"} {
+		snapshot := h.latencySnapshot(path)
+		fmt.Printf(
+			"LATENCY endpoint=%s count=%d avg=%s p50=%s p95=%s p99=%s\n",
+			path,
+			snapshot.Count,
+			snapshot.Avg,
+			snapshot.P50,
+			snapshot.P95,
+			snapshot.P99,
+		)
+	}
 }
