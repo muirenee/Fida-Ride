@@ -48,6 +48,8 @@ type Config struct {
 	RedisAddr             string
 	RedisPassword         string
 	RedisDB               int
+	RedisPoolSize         int
+	RedisMinIdleConns     int
 	PresenceTTL           time.Duration
 	StaleCleanupInterval  time.Duration
 	CleanupBatchSize      int64
@@ -138,8 +140,8 @@ func main() {
 		DialTimeout:  3 * time.Second,
 		ReadTimeout:  cfg.ReadTimeout,
 		WriteTimeout: cfg.WriteTimeout,
-		PoolSize:     100,
-		MinIdleConns: 10,
+		PoolSize:     cfg.RedisPoolSize,
+		MinIdleConns: cfg.RedisMinIdleConns,
 	})
 
 	startupCtx, cancelStartup := context.WithTimeout(context.Background(), 5*time.Second)
@@ -188,6 +190,8 @@ func main() {
 		logger.Info("telemetry service started",
 			"addr", cfg.Addr,
 			"redis_addr", cfg.RedisAddr,
+			"redis_pool_size", cfg.RedisPoolSize,
+			"redis_min_idle_conns", cfg.RedisMinIdleConns,
 			"presence_ttl", cfg.PresenceTTL.String(),
 			"insecure_driver_id_enabled", cfg.AllowInsecureDriverID,
 		)
@@ -224,6 +228,14 @@ func loadConfig() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	redisPoolSize, err := envInt("REDIS_POOL_SIZE", 256)
+	if err != nil {
+		return Config{}, err
+	}
+	redisMinIdleConns, err := envInt("REDIS_MIN_IDLE_CONNS", 64)
+	if err != nil {
+		return Config{}, err
+	}
 	cleanupBatchSize, err := envInt64("STALE_CLEANUP_BATCH_SIZE", 5000)
 	if err != nil {
 		return Config{}, err
@@ -256,6 +268,8 @@ func loadConfig() (Config, error) {
 		RedisAddr:             env("REDIS_ADDR", "redis:6379"),
 		RedisPassword:         os.Getenv("REDIS_PASSWORD"),
 		RedisDB:               redisDB,
+		RedisPoolSize:         redisPoolSize,
+		RedisMinIdleConns:     redisMinIdleConns,
 		PresenceTTL:           presenceTTL,
 		StaleCleanupInterval:  cleanupInterval,
 		CleanupBatchSize:      cleanupBatchSize,
@@ -268,6 +282,12 @@ func loadConfig() (Config, error) {
 		AllowedOrigins:        parseOrigins(os.Getenv("WS_ALLOWED_ORIGINS")),
 	}
 
+	if cfg.RedisPoolSize <= 0 {
+		return Config{}, errors.New("REDIS_POOL_SIZE must be positive")
+	}
+	if cfg.RedisMinIdleConns < 0 || cfg.RedisMinIdleConns > cfg.RedisPoolSize {
+		return Config{}, errors.New("REDIS_MIN_IDLE_CONNS must be between 0 and REDIS_POOL_SIZE")
+	}
 	if cfg.PresenceTTL <= 0 {
 		return Config{}, errors.New("DRIVER_PRESENCE_TTL must be positive")
 	}
@@ -354,6 +374,18 @@ func (s *Server) driverWebSocketHandler(w http.ResponseWriter, r *http.Request) 
 		}
 
 		if err := s.verifyTelemetrySignature(packet); err != nil {
+			if errors.Is(err, errTelemetrySecurityBackendUnavailable) {
+				// Fail closed for this frame, but preserve the authenticated socket.
+				// Disconnecting on transient Redis saturation causes a reconnect storm
+				// that amplifies exactly the overload we are trying to recover from.
+				s.logger.Error(
+					"signed telemetry validation unavailable",
+					"driver_id", driverID,
+					"error", err,
+				)
+				continue
+			}
+
 			s.logger.Warn("signed telemetry rejected", "driver_id", driverID, "error", err)
 			_ = writeClose(conn, websocket.ClosePolicyViolation, "invalid telemetry security session")
 			return
