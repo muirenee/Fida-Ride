@@ -168,6 +168,7 @@ jobs:
             sleep 1
           done
 
+      # Keep this scenario synchronized to exercise reconnect-storm/burst resilience.
       - name: Run concurrent load
         working-directory: tools/loadtest
         shell: bash
