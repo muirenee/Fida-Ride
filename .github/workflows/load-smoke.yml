@@ -81,10 +81,21 @@ jobs:
           docker compose --env-file .env.load up -d postgres redis
 
           for attempt in $(seq 1 60); do
-            if docker exec fida-ride-postgres pg_isready -U fida_ride -d fida_ride >/dev/null 2>&1; then
+            if docker logs fida-ride-postgres 2>&1 | grep -q 'PostgreSQL init process complete; ready for start up.'; then
               break
             fi
             if [ "$attempt" -eq 60 ]; then
+              docker logs fida-ride-postgres
+              exit 1
+            fi
+            sleep 1
+          done
+
+          for attempt in $(seq 1 30); do
+            if docker exec fida-ride-postgres pg_isready -U fida_ride -d fida_ride >/dev/null 2>&1; then
+              break
+            fi
+            if [ "$attempt" -eq 30 ]; then
               docker logs fida-ride-postgres
               exit 1
             fi
@@ -112,8 +123,6 @@ jobs:
             echo "Applying $file"
             docker exec -i fida-ride-postgres sh -lc               'psql -v ON_ERROR_STOP=1 -U fida_ride -d fida_ride' < "$file"
           }
-
-          apply_sql init-db.sql
 
           for migration in database/migrations/schema-v*.sql; do
             apply_sql "$migration"
@@ -331,4 +340,4 @@ jobs:
           if [ -f .env.load ]; then
             docker compose --env-file .env.load down -v --remove-orphans || true
           fi
-          rm -rf .data
+          sudo rm -rf .data || true
