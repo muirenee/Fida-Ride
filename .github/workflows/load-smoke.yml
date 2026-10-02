@@ -216,6 +216,9 @@ jobs:
             fi
           } | tee tools/loadtest/diagnostics.log
 
+          docker logs fida-ride-go-telemetry             > tools/loadtest/go-telemetry.log 2>&1 || true
+          docker logs fida-ride-nestjs-core             > tools/loadtest/nestjs-core.log 2>&1 || true
+
       - name: Upload load-test results
         if: always()
         uses: actions/upload-artifact@v7
@@ -224,6 +227,8 @@ jobs:
           path: |
             tools/loadtest/load-output.log
             tools/loadtest/diagnostics.log
+            tools/loadtest/go-telemetry.log
+            tools/loadtest/nestjs-core.log
           if-no-files-found: warn
           retention-days: 14
 
