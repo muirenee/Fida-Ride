@@ -143,8 +143,8 @@ jobs:
           import time
           import uuid
 
-          DRIVER_COUNT = 200
-          RIDER_COUNT = 30
+          DRIVER_COUNT = 2000
+          RIDER_COUNT = 100
           SECRET = os.environ["JWT_HS256_SECRET"].encode()
           now = int(time.time())
 
@@ -224,9 +224,16 @@ jobs:
           with open("/tmp/load-seed.sql", "w", encoding="utf-8") as handle:
               handle.write("\n".join(sql) + "\n")
 
-          with open("/tmp/load-redis.tsv", "w", encoding="utf-8") as handle:
+          def resp_command(*parts):
+              encoded = [str(part).encode() for part in parts]
+              payload = ("*" + str(len(encoded)) + "\r\n").encode()
+              for part in encoded:
+                  payload += ("$" + str(len(part)) + "\r\n").encode() + part + b"\r\n"
+              return payload
+
+          with open("/tmp/load-redis.resp", "wb") as handle:
               for key, value in redis_rows:
-                  handle.write(key + "\t" + value + "\n")
+                  handle.write(resp_command("SET", key, value, "EX", "3600"))
 
           with open("tools/loadtest/fixtures.json", "w", encoding="utf-8") as handle:
               json.dump({"Drivers": drivers, "Riders": riders}, handle)
