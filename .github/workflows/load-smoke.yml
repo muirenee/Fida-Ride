@@ -46,8 +46,270 @@ jobs:
           set -euo pipefail
           go mod download
           go mod verify
-          test -z "$(gofmt -l .)"
-          go test -run '^$' ./...
+          gofmt -w .
+          go test -run '^
+          go test -c -o fida-loadtest .
+
+      - name: Prepare isolated stack environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > .env.load <<'ENV'
+          POSTGRES_DB=fida_ride
+          POSTGRES_USER=fida_ride
+          POSTGRES_PASSWORD=load-postgres-password
+          REDIS_PASSWORD=load-redis-password
+          JWT_HS256_SECRET=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+          OTP_HMAC_SECRET=abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789
+          NODE_ENV=test
+          OTP_DEV_ECHO=true
+          ATTESTATION_ENFORCEMENT_ENABLED=false
+          FRAUD_DETECTION_ENABLED=false
+          SURGE_PRICING_ENABLED=false
+          WHATSAPP_BOT_ENABLED=false
+          TELEMETRY_ALLOW_INSECURE_DRIVER_ID=false
+          TELEMETRY_SESSION_TTL_SECONDS=3600
+          BIDDING_TTL_SECONDS=120
+          BIDDING_ACCEPT_LOCK_TTL_MS=10000
+          DISPATCH_RADIUS_KM=5
+          DISPATCH_CANDIDATE_LIMIT=100
+          ENV
+
+      - name: Start PostgreSQL and Redis
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker compose --env-file .env.load up -d postgres redis
+
+          for attempt in $(seq 1 60); do
+            if docker exec fida-ride-postgres pg_isready -U fida_ride -d fida_ride >/dev/null 2>&1; then
+              break
+            fi
+            if [ "$attempt" -eq 60 ]; then
+              docker logs fida-ride-postgres
+              exit 1
+            fi
+            sleep 1
+          done
+
+          for attempt in $(seq 1 30); do
+            if docker exec -e REDISCLI_AUTH=load-redis-password fida-ride-redis redis-cli ping | grep -q PONG; then
+              break
+            fi
+            if [ "$attempt" -eq 30 ]; then
+              docker logs fida-ride-redis
+              exit 1
+            fi
+            sleep 1
+          done
+
+      - name: Apply all database migrations
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          apply_sql() {
+            local file="$1"
+            echo "Applying $file"
+            docker exec -i fida-ride-postgres sh -lc               'psql -v ON_ERROR_STOP=1 -U fida_ride -d fida_ride' < "$file"
+          }
+
+          apply_sql init-db.sql
+          for migration in database/migrations/schema-v*.sql; do
+            apply_sql "$migration"
+          done
+
+      - name: Generate load identities, JWTs, and telemetry sessions
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          import base64
+          import hashlib
+          import hmac
+          import json
+          import os
+          import secrets
+          import time
+          import uuid
+
+          DRIVER_COUNT = 200
+          RIDER_COUNT = 30
+          SECRET = os.environ["JWT_HS256_SECRET"].encode()
+          now = int(time.time())
+
+          def b64url(value):
+              return base64.urlsafe_b64encode(value).rstrip(b"=").decode()
+
+          def jwt(payload):
+              header = b64url(json.dumps(
+                  {"alg": "HS256", "typ": "JWT"},
+                  separators=(",", ":"),
+              ).encode())
+              claims = b64url(json.dumps(payload, separators=(",", ":")).encode())
+              signing = (header + "." + claims).encode()
+              signature = b64url(hmac.new(SECRET, signing, hashlib.sha256).digest())
+              return header + "." + claims + "." + signature
+
+          sql = ["BEGIN;"]
+          redis_rows = []
+          drivers = []
+          riders = []
+
+          for i in range(DRIVER_COUNT):
+              user_id = str(uuid.uuid4())
+              driver_id = str(uuid.uuid4())
+              session_id = str(uuid.uuid4())
+              session_key = secrets.token_bytes(32)
+              token = jwt({
+                  "sub": driver_id,
+                  "user_id": user_id,
+                  "role": "driver",
+                  "driver_id": driver_id,
+                  "iat": now,
+                  "exp": now + 3600,
+              })
+
+              sql.append(
+                  "INSERT INTO core.users "
+                  "(id, first_name, last_name, email, status, rating) VALUES "
+                  f"('{user_id}', 'Load', 'Driver{i}', 'load-driver-{i}@example.test', 'active', 4.90);"
+              )
+              sql.append(
+                  "INSERT INTO core.drivers "
+                  "(id, user_id, vehicle_type, license_plate, verification_status, is_online, is_available) VALUES "
+                  f"('{driver_id}', '{user_id}', 'taxi', 'LOAD{i:06d}', 'approved', TRUE, TRUE);"
+              )
+
+              encoded_key = base64.b64encode(session_key).decode()
+              redis_rows.append(("telemetry:active-session:" + driver_id, session_id))
+              redis_rows.append(("telemetry:session:" + driver_id + ":" + session_id, encoded_key))
+              drivers.append({
+                  "DriverID": driver_id,
+                  "JWT": token,
+                  "SessionID": session_id,
+                  "SessionKey": encoded_key,
+              })
+
+          for i in range(RIDER_COUNT):
+              rider_id = str(uuid.uuid4())
+              token = jwt({
+                  "sub": rider_id,
+                  "user_id": rider_id,
+                  "role": "rider",
+                  "iat": now,
+                  "exp": now + 3600,
+              })
+              sql.append(
+                  "INSERT INTO core.users "
+                  "(id, first_name, last_name, email, status, rating) VALUES "
+                  f"('{rider_id}', 'Load', 'Rider{i}', 'load-rider-{i}@example.test', 'active', 5.00);"
+              )
+              riders.append({"RiderID": rider_id, "JWT": token})
+
+          sql.append("COMMIT;")
+          with open("/tmp/load-seed.sql", "w", encoding="utf-8") as handle:
+              handle.write("\n".join(sql) + "\n")
+
+          with open("/tmp/load-redis.tsv", "w", encoding="utf-8") as handle:
+              for key, value in redis_rows:
+                  handle.write(key + "\t" + value + "\n")
+
+          with open("tools/loadtest/fixtures.json", "w", encoding="utf-8") as handle:
+              json.dump({"Drivers": drivers, "Riders": riders}, handle)
+          PY
+
+          docker exec -i fida-ride-postgres sh -lc             'psql -v ON_ERROR_STOP=1 -U fida_ride -d fida_ride' < /tmp/load-seed.sql
+
+          while IFS=$'	' read -r key value; do
+            docker exec -e REDISCLI_AUTH=load-redis-password fida-ride-redis               redis-cli SET "$key" "$value" EX 3600 >/dev/null
+          done < /tmp/load-redis.tsv
+
+      - name: Start Fida-Ride backend services
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker compose --env-file .env.load up -d --build nestjs-core-api go-telemetry-service
+
+          for attempt in $(seq 1 90); do
+            if curl -fsS http://127.0.0.1:3000/api/v1/healthz >/dev/null 2>&1; then
+              break
+            fi
+            if [ "$attempt" -eq 90 ]; then
+              docker logs fida-ride-nestjs-core
+              exit 1
+            fi
+            sleep 2
+          done
+
+          for attempt in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8080/healthz >/dev/null 2>&1; then
+              break
+            fi
+            if [ "$attempt" -eq 60 ]; then
+              docker logs fida-ride-go-telemetry
+              exit 1
+            fi
+            sleep 1
+          done
+
+      - name: Run concurrent smoke load
+        working-directory: tools/loadtest
+        shell: bash
+        env:
+          FIDA_LOADTEST_ENABLE: '1'
+        run: |
+          set -euo pipefail
+          ulimit -n 65535 || true
+
+          ./fida-loadtest             -test.v             -test.run '^TestLoad$'             -test.timeout=0             -drivers=200             -riders=30             -duration=75s             -telemetry-interval=3s             -ride-interval=2s             -bids-per-ride=4             -accept-racers=2             -fixtures=fixtures.json             -redis-addr=127.0.0.1:6379             -redis-password=load-redis-password             2>&1 | tee load-output.log
+
+      - name: Collect database and Redis diagnostics
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          {
+            echo '=== docker stats ==='
+            docker stats --no-stream
+            echo
+            echo '=== PostgreSQL activity ==='
+            docker exec fida-ride-postgres psql -U fida_ride -d fida_ride -c               "SELECT state, count(*) FROM pg_stat_activity WHERE datname='fida_ride' GROUP BY state ORDER BY state;"
+            echo
+            echo '=== trip/index statistics ==='
+            docker exec fida-ride-postgres psql -U fida_ride -d fida_ride -c               "SELECT relname, seq_scan, idx_scan, n_tup_ins, n_tup_upd, n_dead_tup FROM pg_stat_user_tables WHERE schemaname='core' AND relname IN ('trips','trip_bids') ORDER BY relname;"
+            docker exec fida-ride-postgres psql -U fida_ride -d fida_ride -c               "SELECT indexrelname, idx_scan, idx_tup_read, idx_tup_fetch FROM pg_stat_user_indexes WHERE schemaname='core' AND relname='trips' ORDER BY idx_scan DESC;"
+            echo
+            echo '=== Redis info ==='
+            docker exec -e REDISCLI_AUTH=load-redis-password fida-ride-redis               redis-cli INFO stats
+            docker exec -e REDISCLI_AUTH=load-redis-password fida-ride-redis               redis-cli INFO memory
+          } | tee tools/loadtest/diagnostics.log
+
+      - name: Upload load-test results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: fida-ride-load-smoke-results
+          path: |
+            tools/loadtest/load-output.log
+            tools/loadtest/diagnostics.log
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Show backend logs on failure
+        if: failure()
+        shell: bash
+        run: |
+          docker logs --tail 300 fida-ride-nestjs-core || true
+          docker logs --tail 300 fida-ride-go-telemetry || true
+
+      - name: Stop isolated stack
+        if: always()
+        shell: bash
+        run: |
+          docker compose --env-file .env.load down -v --remove-orphans || true
+          rm -rf .data
+ ./...
           go test -c -o fida-loadtest .
 
       - name: Prepare isolated stack environment
