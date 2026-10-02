@@ -22,7 +22,10 @@ const (
 	driverFinancialBlockPrefix   = "finance:driver-online-block:"
 )
 
-var advanceTelemetrySequenceScript = redis.NewScript(`
+var (
+	errTelemetrySecurityBackendUnavailable = errors.New("telemetry security backend unavailable")
+
+	advanceTelemetrySequenceScript = redis.NewScript(`
 local current = redis.call('GET', KEYS[1])
 if current and tonumber(ARGV[1]) <= tonumber(current) then
   return 0
@@ -30,6 +33,7 @@ end
 redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[2])
 return 1
 `)
+)
 
 type telemetrySignatureSettings struct {
 	MaxClockSkew time.Duration
@@ -42,7 +46,7 @@ func loadTelemetrySignatureSettings() (telemetrySignatureSettings, error) {
 	if err != nil {
 		return telemetrySignatureSettings{}, err
 	}
-	redisTimeout, err := envDuration("TELEMETRY_SIGNATURE_REDIS_TIMEOUT", 100*time.Millisecond)
+	redisTimeout, err := envDuration("TELEMETRY_SIGNATURE_REDIS_TIMEOUT", 250*time.Millisecond)
 	if err != nil {
 		return telemetrySignatureSettings{}, err
 	}
@@ -91,7 +95,7 @@ func (s *Server) verifyTelemetrySignature(packet TelemetryPacket) error {
 	financialBlockCmd := pipe.Get(ctx, financialBlockKey)
 	_, execErr := pipe.Exec(ctx)
 	if execErr != nil && !errors.Is(execErr, redis.Nil) {
-		return fmt.Errorf("load telemetry signing session: %w", execErr)
+		return fmt.Errorf("%w: load telemetry signing session: %v", errTelemetrySecurityBackendUnavailable, execErr)
 	}
 
 	if blockValue, blockErr := financialBlockCmd.Result(); blockErr == nil {
@@ -99,11 +103,18 @@ func (s *Server) verifyTelemetrySignature(packet TelemetryPacket) error {
 			return errors.New("driver telemetry blocked by financial credit policy")
 		}
 	} else if !errors.Is(blockErr, redis.Nil) {
-		return fmt.Errorf("load driver financial eligibility: %w", blockErr)
+		return fmt.Errorf("%w: load driver financial eligibility: %v", errTelemetrySecurityBackendUnavailable, blockErr)
 	}
 
 	activeSession, err := activeCmd.Result()
 	if err != nil {
+		if !errors.Is(err, redis.Nil) {
+			return fmt.Errorf(
+				"%w: load active telemetry session: %v",
+				errTelemetrySecurityBackendUnavailable,
+				err,
+			)
+		}
 		return errors.New("driver has no active telemetry signing session")
 	}
 	if !hmac.Equal([]byte(activeSession), []byte(packet.SessionID)) {
@@ -112,6 +123,13 @@ func (s *Server) verifyTelemetrySignature(packet TelemetryPacket) error {
 
 	encodedSecret, err := secretCmd.Result()
 	if err != nil {
+		if !errors.Is(err, redis.Nil) {
+			return fmt.Errorf(
+				"%w: load telemetry session key: %v",
+				errTelemetrySecurityBackendUnavailable,
+				err,
+			)
+		}
 		return errors.New("telemetry session key is unavailable or expired")
 	}
 	secret, err := base64.StdEncoding.DecodeString(encodedSecret)
@@ -140,7 +158,11 @@ func (s *Server) verifyTelemetrySignature(packet TelemetryPacket) error {
 		int64(settings.SequenceTTL/time.Second),
 	).Int()
 	if err != nil {
-		return fmt.Errorf("advance telemetry replay sequence: %w", err)
+		return fmt.Errorf(
+			"%w: advance telemetry replay sequence: %v",
+			errTelemetrySecurityBackendUnavailable,
+			err,
+		)
 	}
 	if advanced != 1 {
 		return errors.New("telemetry frame replay or out-of-order sequence detected")
