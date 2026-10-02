@@ -84,38 +84,7 @@ jobs:
           cp -R "$DRIVER_SHELL/ios" apps/fida_driver/ios
           cp "$DRIVER_SHELL/.metadata" apps/fida_driver/.metadata
 
-          python3 - <<'PY'
-          from pathlib import Path
-
-          permissions = """    <uses-permission android:name="android.permission.INTERNET" />
-    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-"""
-
-          for app, label in (
-              ("apps/fida_rider", "Fida Ride"),
-              ("apps/fida_driver", "Fida Driver"),
-          ):
-              manifest = Path(app) / "android/app/src/main/AndroidManifest.xml"
-              text = manifest.read_text()
-              if "android.permission.ACCESS_FINE_LOCATION" not in text:
-                  text = text.replace("    <application", permissions + "    <application", 1)
-              text = text.replace('android:label="fida_rider"', f'android:label="{label}"')
-              text = text.replace('android:label="fida_driver"', f'android:label="{label}"')
-              manifest.write_text(text)
-
-              plist = Path(app) / "ios/Runner/Info.plist"
-              plist_text = plist.read_text()
-              if "NSLocationWhenInUseUsageDescription" not in plist_text:
-                  plist_text = plist_text.replace(
-                      "</dict>\n</plist>",
-                      "  <key>NSLocationWhenInUseUsageDescription</key>\n"
-                      "  <string>Fida Ride uses your location to show your position and support trips.</string>\n"
-                      "</dict>\n</plist>",
-                  )
-              plist.write_text(plist_text)
-          PY
+          python3 tools/mobile/prepare_native_runners.py
 
       - name: Resolve workspace dependencies
         run: flutter pub get
