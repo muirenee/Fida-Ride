@@ -1,10 +1,17 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:fida_location/fida_location.dart';
 import 'package:fida_ui/src/map/driver_marker_position.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart';
+
+const String _defaultTileUrlTemplate = String.fromEnvironment(
+  'FIDA_MAP_TILE_URL',
+  defaultValue: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+);
 
 final class MapScreen extends StatefulWidget {
   const MapScreen({
@@ -14,6 +21,7 @@ final class MapScreen extends StatefulWidget {
     this.activeDrivers = const <String, DriverMarkerPosition>{},
     this.followTrackedLocation = true,
     this.showTrackingControl = true,
+    this.tileUrlTemplate = _defaultTileUrlTemplate,
   });
 
   final double initialLatitude;
@@ -21,6 +29,7 @@ final class MapScreen extends StatefulWidget {
   final Map<String, DriverMarkerPosition> activeDrivers;
   final bool followTrackedLocation;
   final bool showTrackingControl;
+  final String tileUrlTemplate;
 
   @override
   State<MapScreen> createState() => _MapScreenState();
@@ -28,14 +37,14 @@ final class MapScreen extends StatefulWidget {
 
 final class _MapScreenState extends State<MapScreen>
     with SingleTickerProviderStateMixin {
-  final Completer<GoogleMapController> _mapController =
-      Completer<GoogleMapController>();
+  final MapController _mapController = MapController();
 
   late final AnimationController _markerAnimationController;
   LatLng? _displayedLocation;
   LatLng? _animationStart;
   LatLng? _animationTarget;
   double _displayedBearing = 0;
+  bool _mapReady = false;
 
   @override
   void initState() {
@@ -51,6 +60,7 @@ final class _MapScreenState extends State<MapScreen>
     _markerAnimationController
       ..removeListener(_onMarkerAnimationTick)
       ..dispose();
+    _mapController.dispose();
     super.dispose();
   }
 
@@ -76,40 +86,59 @@ final class _MapScreenState extends State<MapScreen>
 
     await _markerAnimationController.forward(from: 0);
 
-    if (widget.followTrackedLocation && _mapController.isCompleted) {
-      final GoogleMapController controller = await _mapController.future;
-      await controller.animateCamera(CameraUpdate.newLatLng(target));
+    if (widget.followTrackedLocation && _mapReady) {
+      _mapController.move(target, _mapController.camera.zoom);
     }
   }
 
-  Set<Marker> _markers() {
-    final Set<Marker> markers = widget.activeDrivers.values
+  List<Marker> _markers() {
+    final List<Marker> markers = widget.activeDrivers.values
         .map<Marker>(
           (DriverMarkerPosition driver) => Marker(
-            markerId: MarkerId('driver:${driver.driverId}'),
-            position: LatLng(driver.latitude, driver.longitude),
-            rotation: driver.bearing,
-            flat: true,
-            anchor: const Offset(0.5, 0.5),
-            icon: BitmapDescriptor.defaultMarkerWithHue(
-              BitmapDescriptor.hueAzure,
+            point: LatLng(driver.latitude, driver.longitude),
+            width: 44,
+            height: 44,
+            rotate: true,
+            child: Transform.rotate(
+              angle: driver.bearing * math.pi / 180,
+              child: const Icon(
+                Icons.navigation,
+                color: Colors.blue,
+                size: 34,
+              ),
             ),
           ),
         )
-        .toSet();
+        .toList(growable: true);
 
     final LatLng? current = _displayedLocation;
     if (current != null) {
       markers.add(
         Marker(
-          markerId: const MarkerId('tracked-device'),
-          position: current,
-          rotation: _displayedBearing,
-          flat: true,
-          anchor: const Offset(0.5, 0.5),
-          zIndexInt: 100,
-          icon: BitmapDescriptor.defaultMarkerWithHue(
-            BitmapDescriptor.hueGreen,
+          point: current,
+          width: 48,
+          height: 48,
+          rotate: true,
+          child: Transform.rotate(
+            angle: _displayedBearing * math.pi / 180,
+            child: const DecoratedBox(
+              decoration: BoxDecoration(
+                color: Colors.green,
+                shape: BoxShape.circle,
+                boxShadow: <BoxShadow>[
+                  BoxShadow(
+                    color: Colors.black26,
+                    blurRadius: 6,
+                    offset: Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: Icon(
+                Icons.navigation,
+                color: Colors.white,
+                size: 28,
+              ),
+            ),
           ),
         ),
       );
@@ -132,24 +161,34 @@ final class _MapScreenState extends State<MapScreen>
         return Scaffold(
           body: Stack(
             children: <Widget>[
-              GoogleMap(
-                initialCameraPosition: CameraPosition(
-                  target: LatLng(
+              FlutterMap(
+                mapController: _mapController,
+                options: MapOptions(
+                  initialCenter: LatLng(
                     widget.initialLatitude,
                     widget.initialLongitude,
                   ),
-                  zoom: 15,
+                  initialZoom: 15,
+                  minZoom: 3,
+                  maxZoom: 19,
+                  onMapReady: () {
+                    _mapReady = true;
+                  },
                 ),
-                markers: _markers(),
-                compassEnabled: true,
-                mapToolbarEnabled: false,
-                myLocationButtonEnabled: false,
-                zoomControlsEnabled: false,
-                onMapCreated: (GoogleMapController controller) {
-                  if (!_mapController.isCompleted) {
-                    _mapController.complete(controller);
-                  }
-                },
+                children: <Widget>[
+                  TileLayer(
+                    urlTemplate: widget.tileUrlTemplate,
+                    userAgentPackageName: 'com.fidalix.fida_ride',
+                    maxZoom: 19,
+                  ),
+                  MarkerLayer(markers: _markers()),
+                  const RichAttributionWidget(
+                    showFlutterMapAttribution: false,
+                    attributions: <SourceAttribution>[
+                      TextSourceAttribution('OpenStreetMap contributors'),
+                    ],
+                  ),
+                ],
               ),
               if (state is LocationTrackingFailure)
                 SafeArea(
