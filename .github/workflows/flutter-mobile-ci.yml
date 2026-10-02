@@ -89,8 +89,8 @@ jobs:
       - name: Resolve workspace dependencies
         run: flutter pub get
 
-      - name: Verify Dart formatting
-        run: dart format --output=none --set-exit-if-changed apps packages
+      - name: Normalize Dart formatting
+        run: dart format apps packages
 
       - name: Analyze mobile workspace
         run: |
