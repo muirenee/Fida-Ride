@@ -38,7 +38,7 @@ services:
       WS_IDLE_TIMEOUT: ${ADMIN_WS_IDLE_TIMEOUT:-60s}
       WS_PING_INTERVAL: ${ADMIN_WS_PING_INTERVAL:-25s}
     ports:
-      - "127.0.0.1:${ADMIN_STREAM_PORT:-8090}:8090"
+      - "${SERVICE_BIND_IP:-127.0.0.1}:${ADMIN_STREAM_PORT:-8090}:8090"
     depends_on:
       redis:
         condition: service_healthy
@@ -78,7 +78,7 @@ services:
       HOSTNAME: 0.0.0.0
       CORE_API_INTERNAL_URL: http://nestjs-core-api:3000
     ports:
-      - "127.0.0.1:${ADMIN_WEB_PORT:-3001}:3000"
+      - "${SERVICE_BIND_IP:-127.0.0.1}:${ADMIN_WEB_PORT:-3001}:3000"
     depends_on:
       nestjs-core-api:
         condition: service_healthy
