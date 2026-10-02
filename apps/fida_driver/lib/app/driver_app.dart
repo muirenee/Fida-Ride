@@ -144,7 +144,7 @@ final class _DriverSignInScreenState extends State<_DriverSignInScreen> {
     final String? challengeId = _challengeId;
     final String code = _codeController.text.trim();
     if (challengeId == null) return;
-    if (!RegExp(r'^\\d{6}$').hasMatch(code)) {
+    if (!RegExp(r'^\d{6}$').hasMatch(code)) {
       setState(() => _error = 'Enter the 6-digit verification code.');
       return;
     }
@@ -556,7 +556,7 @@ final class _ButtonProgress extends StatelessWidget {
   }
 }
 
-bool _isE164(String phone) => RegExp(r'^\\+[1-9]\\d{7,14}$').hasMatch(phone);
+bool _isE164(String phone) => RegExp(r'^\+[1-9]\d{7,14}$').hasMatch(phone);
 
 String _requiredString(Map<String, Object?> json, String key) {
   final Object? value = json[key];
