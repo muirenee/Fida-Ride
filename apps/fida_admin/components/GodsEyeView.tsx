@@ -52,6 +52,28 @@ const SOURCE_RENDER_INTERVAL_MS = 100;
 const DRIVER_STALE_AFTER_MS = 35_000;
 const METRICS_POLL_MS = 5_000;
 
+function resolveAdminStreamUrl(configuredUrl?: string): string {
+  if (typeof window === 'undefined') {
+    return configuredUrl ?? 'ws://127.0.0.1:8090/admin/stream';
+  }
+
+  const pageProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const sameOriginUrl = `${pageProtocol}//${window.location.host}/admin/stream`;
+  if (!configuredUrl) return sameOriginUrl;
+
+  try {
+    const parsed = new URL(configuredUrl);
+    const isLoopback = parsed.hostname === '127.0.0.1' || parsed.hostname === 'localhost';
+    if (isLoopback) return sameOriginUrl;
+    if (window.location.protocol === 'https:' && parsed.protocol === 'ws:') {
+      parsed.protocol = 'wss:';
+    }
+    return parsed.toString();
+  } catch {
+    return sameOriginUrl;
+  }
+}
+
 const EMPTY_METRICS: AdminMetrics = {
   active_trips: 0,
   available_drivers: 0,
@@ -106,7 +128,7 @@ function formatMoney(amount: string, currency: string): string {
 }
 
 export function GodsEyeView({
-  streamUrl = process.env.NEXT_PUBLIC_ADMIN_STREAM_URL ?? 'ws://127.0.0.1:8090/admin/stream',
+  streamUrl,
   mapStyleUrl =
     process.env.NEXT_PUBLIC_MAP_STYLE_URL ?? 'https://demotiles.maplibre.org/style.json',
   apiBasePath = '',
@@ -124,6 +146,10 @@ export function GodsEyeView({
   const [visibleDrivers, setVisibleDrivers] = useState(0);
   const [metrics, setMetrics] = useState<AdminMetrics>(EMPTY_METRICS);
   const [metricsError, setMetricsError] = useState(false);
+  const resolvedStreamUrl = useMemo(
+    () => resolveAdminStreamUrl(streamUrl ?? process.env.NEXT_PUBLIC_ADMIN_STREAM_URL),
+    [streamUrl],
+  );
 
   const sendViewport = useCallback(() => {
     const map = mapRef.current;
@@ -215,7 +241,16 @@ export function GodsEyeView({
       if (stopped) return;
       setStreamState(attempt === 0 ? 'connecting' : 'reconnecting');
 
-      const socket = new WebSocket(streamUrl, [STREAM_PROTOCOL]);
+      let socket: WebSocket;
+      try {
+        socket = new WebSocket(resolvedStreamUrl, [STREAM_PROTOCOL]);
+      } catch {
+        setStreamState('offline');
+        attempt += 1;
+        const backoff = Math.min(30_000, 750 * 2 ** Math.min(attempt, 6));
+        retryTimer = setTimeout(connect, backoff);
+        return;
+      }
       socketRef.current = socket;
 
       socket.onopen = () => {
@@ -280,7 +315,7 @@ export function GodsEyeView({
         socket.close(1000, 'dashboard unmounted');
       }
     };
-  }, [sendViewport, streamUrl]);
+  }, [resolvedStreamUrl, sendViewport]);
 
   useEffect(() => {
     let stopped = false;
