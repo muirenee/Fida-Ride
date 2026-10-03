@@ -3,6 +3,8 @@ import {
   Controller,
   ForbiddenException,
   Get,
+  HttpCode,
+  HttpStatus,
   Param,
   ParseUUIDPipe,
   Post,
@@ -51,6 +53,7 @@ export class RidesController {
   }
 
   @Post('driver/availability')
+  @HttpCode(HttpStatus.OK)
   @UseGuards(JwtAuthGuard)
   setDriverAvailability(
     @Req() request: AuthenticatedRequest,
@@ -69,6 +72,7 @@ export class RidesController {
   }
 
   @Post(':tripId/accept')
+  @HttpCode(HttpStatus.OK)
   @UseGuards(JwtAuthGuard)
   acceptTrip(
     @Req() request: AuthenticatedRequest,
@@ -78,6 +82,7 @@ export class RidesController {
   }
 
   @Post(':tripId/action')
+  @HttpCode(HttpStatus.OK)
   @UseGuards(JwtAuthGuard)
   driverAction(
     @Req() request: AuthenticatedRequest,
@@ -88,6 +93,7 @@ export class RidesController {
   }
 
   @Post(':tripId/cancel')
+  @HttpCode(HttpStatus.OK)
   @UseGuards(JwtAuthGuard)
   cancelTrip(
     @Req() request: AuthenticatedRequest,
