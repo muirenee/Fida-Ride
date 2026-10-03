@@ -107,11 +107,7 @@ final class _MapScreenState extends State<MapScreen>
             rotate: true,
             child: Transform.rotate(
               angle: driver.bearing * math.pi / 180,
-              child: const Icon(
-                Icons.navigation,
-                color: Colors.blue,
-                size: 34,
-              ),
+              child: const Icon(Icons.navigation, color: Colors.blue, size: 34),
             ),
           ),
         )
@@ -139,11 +135,7 @@ final class _MapScreenState extends State<MapScreen>
                   ),
                 ],
               ),
-              child: Icon(
-                Icons.navigation,
-                color: Colors.white,
-                size: 28,
-              ),
+              child: Icon(Icons.navigation, color: Colors.white, size: 28),
             ),
           ),
         ),
@@ -158,11 +150,7 @@ final class _MapScreenState extends State<MapScreen>
           point: LatLng(destinationLatitude, destinationLongitude),
           width: 48,
           height: 48,
-          child: const Icon(
-            Icons.location_pin,
-            color: Colors.black,
-            size: 44,
-          ),
+          child: const Icon(Icons.location_pin, color: Colors.black, size: 44),
         ),
       );
     }

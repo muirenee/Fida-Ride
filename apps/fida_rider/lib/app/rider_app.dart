@@ -12,9 +12,7 @@ final class RiderApp extends StatelessWidget {
       title: 'Fida Ride',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF17A85B),
-        ),
+        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF17A85B)),
         scaffoldBackgroundColor: Colors.white,
         useMaterial3: true,
       ),
