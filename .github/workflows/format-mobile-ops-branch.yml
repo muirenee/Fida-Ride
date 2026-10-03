@@ -1,0 +1,44 @@
+name: Normalize Mobile Operations Branch
+
+on:
+  push:
+    branches:
+      - feature/mobile-ride-operations
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feature/mobile-ride-operations
+          fetch-depth: 0
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Resolve Flutter workspace dependencies
+        run: flutter pub get
+
+      - name: Format Flutter sources
+        run: dart format apps packages
+
+      - name: Commit normalized sources
+        run: |
+          if git diff --quiet; then
+            echo "No formatting changes required."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps packages pubspec.lock
+          git commit -m "chore: normalize existing Flutter formatting"
+          git push origin HEAD:feature/mobile-ride-operations
