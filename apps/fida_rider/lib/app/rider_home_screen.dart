@@ -39,85 +39,15 @@ final class _RiderHomeScreenState extends State<RiderHomeScreen> {
     });
   }
 
-  Future<void> _openDestinationSheet() {
-    return showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: false,
-      backgroundColor: Colors.white,
-      builder: (BuildContext context) {
-        final EdgeInsets insets = MediaQuery.viewInsetsOf(context);
-        return Padding(
-          padding: EdgeInsets.fromLTRB(20, 12, 20, 20 + insets.bottom),
-          child: SafeArea(
-            top: false,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: <Widget>[
-                Align(
-                  alignment: Alignment.center,
-                  child: Container(
-                    width: 42,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFD7D7D7),
-                      borderRadius: BorderRadius.circular(100),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 22),
-                const Text(
-                  'Where to?',
-                  style: TextStyle(
-                    fontSize: 26,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: -0.7,
-                  ),
-                ),
-                const SizedBox(height: 18),
-                const _LocationField(
-                  icon: Icons.radio_button_checked,
-                  iconColor: Color(0xFF17A85B),
-                  title: 'Current location',
-                  subtitle: 'Using your device location',
-                ),
-                const SizedBox(height: 10),
-                const _LocationField(
-                  icon: Icons.search,
-                  iconColor: Colors.black,
-                  title: 'Search destination',
-                  subtitle: 'Address search is coming next',
-                ),
-                const SizedBox(height: 14),
-                FilledButton.icon(
-                  onPressed: _startMapSelection,
-                  icon: const Icon(Icons.add_location_alt_outlined),
-                  label: const Text('Choose destination on map'),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: Colors.black,
-                    foregroundColor: Colors.white,
-                    minimumSize: const Size.fromHeight(54),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  'For this test build, tap the map to pin your destination. Address search and saved places will be connected to the geocoding service in the next step.',
-                  style: TextStyle(
-                    color: Colors.grey.shade600,
-                    fontSize: 12,
-                    height: 1.35,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
+  Future<void> _openDestinationSheet() async {
+    final bool? chooseOnMap = await Navigator.of(context).push<bool>(
+      MaterialPageRoute<bool>(
+        builder: (BuildContext context) => const _DestinationSearchScreen(),
+      ),
     );
+
+    if (!mounted || chooseOnMap != true) return;
+    setState(() => _selectingDestination = true);
   }
 
   @override
@@ -428,6 +358,260 @@ final class _HomePanel extends StatelessWidget {
   }
 }
 
+final class _DestinationSearchScreen extends StatefulWidget {
+  const _DestinationSearchScreen();
+
+  @override
+  State<_DestinationSearchScreen> createState() =>
+      _DestinationSearchScreenState();
+}
+
+final class _DestinationSearchScreenState
+    extends State<_DestinationSearchScreen> {
+  final TextEditingController _searchController = TextEditingController();
+  String _query = '';
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bool hasQuery = _query.trim().isNotEmpty;
+
+    return Scaffold(
+      backgroundColor: Colors.white,
+      body: SafeArea(
+        child: Column(
+          children: <Widget>[
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
+              child: Row(
+                children: <Widget>[
+                  IconButton(
+                    onPressed: () => Navigator.of(context).pop(false),
+                    icon: const Icon(Icons.arrow_back_rounded),
+                    tooltip: 'Back',
+                  ),
+                  const SizedBox(width: 4),
+                  Expanded(
+                    child: TextField(
+                      controller: _searchController,
+                      autofocus: true,
+                      textInputAction: TextInputAction.search,
+                      onChanged: (String value) =>
+                          setState(() => _query = value),
+                      decoration: InputDecoration(
+                        hintText: 'Where to?',
+                        prefixIcon: const Icon(Icons.search_rounded),
+                        suffixIcon: hasQuery
+                            ? IconButton(
+                                onPressed: () {
+                                  _searchController.clear();
+                                  setState(() => _query = '');
+                                },
+                                icon: const Icon(Icons.close_rounded),
+                              )
+                            : null,
+                        filled: true,
+                        fillColor: const Color(0xFFF2F2F2),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(18),
+                          borderSide: BorderSide.none,
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 16,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Padding(
+              padding: EdgeInsets.fromLTRB(20, 4, 20, 14),
+              child: Row(
+                children: <Widget>[
+                  Icon(
+                    Icons.my_location_rounded,
+                    color: Color(0xFF17A85B),
+                    size: 22,
+                  ),
+                  SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Text(
+                          'Pickup',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Color(0xFF777777),
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        SizedBox(height: 2),
+                        Text(
+                          'Current location',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
+                children: <Widget>[
+                  _DestinationActionTile(
+                    icon: Icons.add_location_alt_outlined,
+                    title: 'Choose destination on map',
+                    subtitle: 'Drop a pin exactly where you want to go',
+                    onTap: () => Navigator.of(context).pop(true),
+                  ),
+                  const SizedBox(height: 18),
+                  const Text(
+                    'Saved places',
+                    style: TextStyle(
+                      fontSize: 17,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  const _DestinationActionTile(
+                    icon: Icons.home_outlined,
+                    title: 'Home',
+                    subtitle: 'Add your home address',
+                  ),
+                  const _DestinationActionTile(
+                    icon: Icons.work_outline_rounded,
+                    title: 'Work',
+                    subtitle: 'Add your work address',
+                  ),
+                  const SizedBox(height: 18),
+                  Text(
+                    hasQuery ? 'Search' : 'Recent destinations',
+                    style: const TextStyle(
+                      fontSize: 17,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  if (hasQuery)
+                    _DestinationEmptyState(
+                      icon: Icons.search_rounded,
+                      title: 'Searching for “${_query.trim()}”',
+                      subtitle:
+                          'Address search will be connected to the Fida geocoding service. You can choose the destination on the map now.',
+                    )
+                  else
+                    const _DestinationEmptyState(
+                      icon: Icons.history_rounded,
+                      title: 'No recent destinations yet',
+                      subtitle:
+                          'Places you ride to will appear here for faster booking.',
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+final class _DestinationActionTile extends StatelessWidget {
+  const _DestinationActionTile({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    this.onTap,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      onTap: onTap,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+      leading: Container(
+        width: 44,
+        height: 44,
+        decoration: BoxDecoration(
+          color: const Color(0xFFF2F2F2),
+          borderRadius: BorderRadius.circular(13),
+        ),
+        child: Icon(icon, color: Colors.black87),
+      ),
+      title: Text(
+        title,
+        style: const TextStyle(fontWeight: FontWeight.w700),
+      ),
+      subtitle: Text(subtitle),
+      trailing: onTap == null
+          ? const Icon(Icons.add_rounded)
+          : const Icon(Icons.chevron_right_rounded),
+    );
+  }
+}
+
+final class _DestinationEmptyState extends StatelessWidget {
+  const _DestinationEmptyState({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(22),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF7F7F7),
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Column(
+        children: <Widget>[
+          Icon(icon, size: 34, color: Colors.black54),
+          const SizedBox(height: 10),
+          Text(
+            title,
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            subtitle,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: Color(0xFF6A6A6A),
+              height: 1.35,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 final class _RideOption extends StatelessWidget {
   const _RideOption({
     required this.value,
@@ -470,53 +654,6 @@ final class _RideOption extends StatelessWidget {
             ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-final class _LocationField extends StatelessWidget {
-  const _LocationField({
-    required this.icon,
-    required this.iconColor,
-    required this.title,
-    required this.subtitle,
-  });
-
-  final IconData icon;
-  final Color iconColor;
-  final String title;
-  final String subtitle;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF4F4F4),
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: Row(
-        children: <Widget>[
-          Icon(icon, color: iconColor, size: 22),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Text(
-                  title,
-                  style: const TextStyle(fontWeight: FontWeight.w700),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  subtitle,
-                  style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
-                ),
-              ],
-            ),
-          ),
-        ],
       ),
     );
   }
