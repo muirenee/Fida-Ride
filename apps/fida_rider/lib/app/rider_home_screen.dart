@@ -1,7 +1,5 @@
-import 'package:fida_location/fida_location.dart';
 import 'package:fida_ui/fida_ui.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_bloc/flutter_bloc.dart';
 
 final class RiderHomeScreen extends StatefulWidget {
   const RiderHomeScreen({super.key});
