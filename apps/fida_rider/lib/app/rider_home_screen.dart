@@ -17,11 +17,6 @@ final class _RiderHomeScreenState extends State<RiderHomeScreen> {
   bool get _hasDestination =>
       _destinationLatitude != null && _destinationLongitude != null;
 
-  void _startMapSelection() {
-    Navigator.of(context).pop();
-    setState(() => _selectingDestination = true);
-  }
-
   void _selectDestination(double latitude, double longitude) {
     if (!_selectingDestination) return;
     setState(() {
