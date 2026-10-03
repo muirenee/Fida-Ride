@@ -17,6 +17,9 @@ export class TripEntity {
   @Column({ type: 'varchar', length: 24, default: 'created' })
   status!: string;
 
+  @Column({ type: 'bigint', default: 0 })
+  revision!: string;
+
   @Column({ name: 'vehicle_type', type: 'varchar', length: 32 })
   vehicleType!: string;
 
@@ -59,6 +62,9 @@ export class TripEntity {
   @Column({ name: 'accepted_at', type: 'timestamptz', nullable: true })
   acceptedAt!: Date | null;
 
+  @Column({ name: 'arrived_at', type: 'timestamptz', nullable: true })
+  arrivedAt!: Date | null;
+
   @Column({ name: 'picked_up_at', type: 'timestamptz', nullable: true })
   pickedUpAt!: Date | null;
 
@@ -70,6 +76,12 @@ export class TripEntity {
 
   @Column({ name: 'cancelled_at', type: 'timestamptz', nullable: true })
   cancelledAt!: Date | null;
+
+  @Column({ name: 'cancellation_actor', type: 'varchar', length: 16, nullable: true })
+  cancellationActor!: string | null;
+
+  @Column({ name: 'cancellation_reason', type: 'varchar', length: 255, nullable: true })
+  cancellationReason!: string | null;
 
   @Column({ name: 'updated_at', type: 'timestamptz' })
   updatedAt!: Date;

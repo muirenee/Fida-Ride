@@ -208,6 +208,22 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     return Number(result);
   }
 
+  async upsertDriverLocation(
+    driverId: string,
+    longitude: number,
+    latitude: number,
+  ): Promise<void> {
+    await this.client.geoAdd('drivers:locations', {
+      longitude,
+      latitude,
+      member: driverId,
+    });
+  }
+
+  async removeDriverLocation(driverId: string): Promise<void> {
+    await this.client.zRem('drivers:locations', driverId);
+  }
+
   async geoSearch(
     key: string,
     longitude: number,
@@ -340,6 +356,14 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
 
     if (!Array.isArray(result)) return [];
     return result.map((driverId) => String(driverId));
+  }
+
+  async cancelBidding(tripId: string): Promise<void> {
+    await this.client.del([
+      this.biddingStateKey(tripId),
+      this.biddingOffersKey(tripId),
+      this.biddingEligibleKey(tripId),
+    ]);
   }
 
   private biddingStateKey(tripId: string): string {
