@@ -32,6 +32,12 @@ export class RidesController {
     return this.rides.requestRide(dto);
   }
 
+  @Get('rider/active')
+  @UseGuards(JwtAuthGuard)
+  activeRiderTrip(@Req() request: AuthenticatedRequest) {
+    return this.rides.getActiveRiderTrip(request.user);
+  }
+
   @Get('driver/offers')
   @UseGuards(JwtAuthGuard)
   driverOffers(@Req() request: AuthenticatedRequest) {
