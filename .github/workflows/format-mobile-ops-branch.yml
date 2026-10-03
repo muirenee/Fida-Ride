@@ -39,6 +39,6 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add apps packages pubspec.lock
+          git add apps packages
           git commit -m "chore: normalize existing Flutter formatting"
           git push origin HEAD:feature/mobile-ride-operations
