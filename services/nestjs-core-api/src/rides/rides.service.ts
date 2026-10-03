@@ -151,6 +151,24 @@ export class RidesService {
     return this.snapshot(trip);
   }
 
+  async getActiveRiderTrip(principal: AuthPrincipal) {
+    if (principal.role !== 'rider') {
+      throw new ForbiddenException('Rider access token required');
+    }
+
+    const trip = await this.trips.findOne({
+      where: {
+        riderId: principal.user_id,
+        status: In(['created', 'matching', ...ACTIVE_DRIVER_STATUSES]),
+      },
+      order: { updatedAt: 'DESC' },
+    });
+
+    return {
+      trip: trip ? this.snapshot(trip) : null,
+    };
+  }
+
   async getActiveDriverTrip(principal: AuthPrincipal) {
     const driver = await this.requireDriverPrincipal(principal);
     const trip = await this.trips.findOne({
