@@ -13,10 +13,5 @@ void main() {
     defaultValue: 'wss://fidaride.netsource.co.rw/ws/driver',
   );
 
-  runApp(
-    const DriverApp(
-      apiBaseUrl: apiBaseUrl,
-      telemetryUrl: telemetryUrl,
-    ),
-  );
+  runApp(const DriverApp(apiBaseUrl: apiBaseUrl, telemetryUrl: telemetryUrl));
 }

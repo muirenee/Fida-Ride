@@ -17,11 +17,6 @@ final class _RiderHomeScreenState extends State<RiderHomeScreen> {
   bool get _hasDestination =>
       _destinationLatitude != null && _destinationLongitude != null;
 
-  void _startMapSelection() {
-    Navigator.of(context).pop();
-    setState(() => _selectingDestination = true);
-  }
-
   void _selectDestination(double latitude, double longitude) {
     if (!_selectingDestination) return;
     setState(() {
@@ -481,10 +476,7 @@ final class _DestinationSearchScreenState
                   const SizedBox(height: 18),
                   const Text(
                     'Saved places',
-                    style: TextStyle(
-                      fontSize: 17,
-                      fontWeight: FontWeight.w800,
-                    ),
+                    style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
                   ),
                   const SizedBox(height: 8),
                   const _DestinationActionTile(
@@ -510,15 +502,13 @@ final class _DestinationSearchScreenState
                     _DestinationEmptyState(
                       icon: Icons.search_rounded,
                       title: 'Searching for “${_query.trim()}”',
-                      subtitle:
-                          'Address search will be connected to the Fida geocoding service. You can choose the destination on the map now.',
+                      subtitle: 'Address search will be connected to the Fida geocoding service. You can choose the destination on the map now.',
                     )
                   else
                     const _DestinationEmptyState(
                       icon: Icons.history_rounded,
                       title: 'No recent destinations yet',
-                      subtitle:
-                          'Places you ride to will appear here for faster booking.',
+                      subtitle: 'Places you ride to will appear here for faster booking.',
                     ),
                 ],
               ),
@@ -557,10 +547,7 @@ final class _DestinationActionTile extends StatelessWidget {
         ),
         child: Icon(icon, color: Colors.black87),
       ),
-      title: Text(
-        title,
-        style: const TextStyle(fontWeight: FontWeight.w700),
-      ),
+      title: Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
       subtitle: Text(subtitle),
       trailing: onTap == null
           ? const Icon(Icons.add_rounded)
@@ -601,10 +588,7 @@ final class _DestinationEmptyState extends StatelessWidget {
           Text(
             subtitle,
             textAlign: TextAlign.center,
-            style: const TextStyle(
-              color: Color(0xFF6A6A6A),
-              height: 1.35,
-            ),
+            style: const TextStyle(color: Color(0xFF6A6A6A), height: 1.35),
           ),
         ],
       ),
@@ -679,10 +663,7 @@ final class _RoundActionButton extends StatelessWidget {
         color: Colors.white,
         shape: const CircleBorder(),
         elevation: 5,
-        child: IconButton(
-          onPressed: onPressed,
-          icon: Icon(icon),
-        ),
+        child: IconButton(onPressed: onPressed, icon: Icon(icon)),
       ),
     );
   }

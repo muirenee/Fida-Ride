@@ -59,7 +59,9 @@ final class _DriverAppState extends State<DriverApp> {
   }
 }
 
-typedef _AuthenticatedCallback = void Function(DriverTelemetryPublisher publisher);
+typedef _AuthenticatedCallback = void Function(
+  DriverTelemetryPublisher publisher,
+);
 
 final class _DriverSignInScreen extends StatefulWidget {
   const _DriverSignInScreen({
@@ -100,8 +102,7 @@ final class _DriverSignInScreenState extends State<_DriverSignInScreen> {
     final String phone = _phoneController.text.trim();
     if (!_isE164(phone)) {
       setState(
-        () => _error =
-            'Enter the phone number in international format, for example +2507XXXXXXXX.',
+        () => _error = 'Enter the phone number in international format, for example +2507XXXXXXXX.',
       );
       return;
     }
@@ -119,8 +120,7 @@ final class _DriverSignInScreenState extends State<_DriverSignInScreen> {
       final Object? challengeValue = response['challenge_id'];
       if (challengeValue is! String || challengeValue.isEmpty) {
         setState(() {
-          _error =
-              'No active driver account was found for this phone number. Register this driver first.';
+          _error = 'No active driver account was found for this phone number. Register this driver first.';
         });
         return;
       }
@@ -157,10 +157,7 @@ final class _DriverSignInScreenState extends State<_DriverSignInScreen> {
     try {
       final Map<String, Object?> authResponse = await _publicApi.postJson(
         '/api/v1/auth/phone/verify',
-        body: <String, Object?>{
-          'challenge_id': challengeId,
-          'code': code,
-        },
+        body: <String, Object?>{'challenge_id': challengeId, 'code': code},
       );
 
       final String accessToken = _requiredString(authResponse, 'access_token');
@@ -176,8 +173,8 @@ final class _DriverSignInScreenState extends State<_DriverSignInScreen> {
         baseUrl: widget.apiBaseUrl,
         accessTokenProvider: () async => accessToken,
       );
-      final Map<String, Object?> sessionResponse =
-          await authenticatedApi.postJson(
+      final Map<String, Object?> sessionResponse = await authenticatedApi
+          .postJson(
             '/api/v1/auth/telemetry-session',
             body: <String, Object?>{'purpose': 'driver_online'},
           );
@@ -185,11 +182,10 @@ final class _DriverSignInScreenState extends State<_DriverSignInScreen> {
         sessionResponse,
       );
 
-      final TelemetryWebSocketClient telemetryClient =
-          TelemetryWebSocketClient(
-            endpoint: Uri.parse(widget.telemetryUrl),
-            accessToken: accessToken,
-          );
+      final TelemetryWebSocketClient telemetryClient = TelemetryWebSocketClient(
+        endpoint: Uri.parse(widget.telemetryUrl),
+        accessToken: accessToken,
+      );
       final DriverTelemetryPublisher publisher = DriverTelemetryPublisher(
         telemetryClient: telemetryClient,
         telemetrySigner: TelemetrySigner(session: session),
@@ -251,9 +247,8 @@ final class _DriverSignInScreenState extends State<_DriverSignInScreen> {
                   const SizedBox(height: 20),
                   Text(
                     awaitingCode ? 'Verify your phone' : 'Drive with Fida',
-                    style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
+                    style: Theme.of(context).textTheme.headlineMedium
+                        ?.copyWith(fontWeight: FontWeight.w700),
                     textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 8),
@@ -403,8 +398,7 @@ final class _DriverRegistrationScreenState
         !_isE164(phone) ||
         plate.length < 2) {
       setState(() {
-        _error =
-            'Enter first name, last name, a valid international phone number, and the vehicle plate.';
+        _error = 'Enter first name, last name, a valid international phone number, and the vehicle plate.';
       });
       return;
     }

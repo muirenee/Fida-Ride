@@ -66,7 +66,7 @@ export class AdminService {
               (
                 SELECT COUNT(*)::int
                 FROM core.trips t
-                WHERE t.status IN ('accepted', 'picked_up')
+                WHERE t.status IN ('accepted', 'en_route', 'arrived', 'picked_up')
               ) AS active_trips,
               (
                 SELECT COUNT(*)::int
